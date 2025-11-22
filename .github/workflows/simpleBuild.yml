@@ -1,5 +1,5 @@
 ---
-# Github Actions build for rclone
+# Github Actions Simplebuild for rclone
 # -*- compile-command: "yamllint -f parsable build.yml" -*-
 
 name: simpleBuild
