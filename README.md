@@ -1,3 +1,5 @@
+![Downloads](https://img.shields.io/github/downloads/gulp79/Round-Sync/total?style=for-the-badge&labelColor=21262d&color=238636)
+
 > ⚠️ **Unofficial Fork Disclaimer**  
 > This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alldebrid**, **iCloud Photos**, **Teldrive** and **Terabox** support. 
 > All the backends are from [bclone](https://github.com/BenjiThatFoxGuy/bclone), i've just updated rclone to v1.72.0 official.
