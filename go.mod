@@ -1,4 +1,4 @@
-module github.com/gulp79/rclone-extra
+module github.com/rclone/rclone
 
 go 1.24.4
 
