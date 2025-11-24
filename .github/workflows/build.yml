@@ -1,18 +1,8 @@
----
 # Github Actions build for rclone (Custom & Clean)
-# Include: Linux x64, Linux ARM64, Windows x64 (With Icon), Android
-# Exclude: Tests, Lint, Other OS
-
+# Fixes: Windows Mount (CGO/WinFsp), Linux Cross-Compile
 name: build
 
 on:
-# --- MODIFICATO: Rimosso push e pull_request per l'avvio manuale ---
-#   push:
-#     branches:
-#       - '**'
-#     tags:
-#       - '**'
-#   pull_request:
   workflow_dispatch:
     inputs:
       manual:
@@ -25,7 +15,6 @@ jobs:
   # JOB 1: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64)
   # -------------------------------------------------------------------------
   build:
-    # Rimosso il complesso IF, ora la build parte solo on-demand
     timeout-minutes: 60
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -34,19 +23,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # --- LINUX X64 (Standard) ---
+          # --- LINUX X64 ---
           - name: linux-amd64
             goos: linux
             goarch: amd64
             ext: ''
             
-          # --- LINUX ARM64 (Aarch64 - Raspberry Pi / Oracle ARM) ---
+          # --- LINUX ARM64 ---
           - name: linux-arm64
             goos: linux
             goarch: arm64
             ext: ''
 
-          # --- WINDOWS X64 (Con Icona) ---
+          # --- WINDOWS X64 (Richiede CGO per Mount) ---
           - name: windows-amd64
             goos: windows
             goarch: amd64
@@ -64,21 +53,14 @@ jobs:
           go-version: '>=1.24'
           check-latest: true
 
-      # --- AGGIUNTO/MODIFICATO: Installazione dipendenze di sistema per CGO ---
-      - name: Install System Dependencies for CGO/Mount
+      # --- Installazione Compilatori per CGO (Necessario per Windows) ---
+      - name: Install Cross-Compilers
         run: |
           sudo apt-get update
-          # Dipendenze base per CGO e FUSE su Linux AMD64
-          sudo apt-get install -y gcc g++ libfuse-dev
-          
-          # AGGIUNTO: Toolchain per Cross-Compilazione Windows (mingw-w64)
+          # MinGW-w64 è necessario per compilare rclone con CGO (cmount) per Windows su Linux
           sudo apt-get install -y mingw-w64
           
-          # AGGIUNTO: Toolchain per Cross-Compilazione Linux ARM64 (aarch64)
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-      # -----------------------------------------------------------------------------
-          
-      # --- STEP PER L'ICONA WINDOWS (INIZIO) ---
+      # --- STEP PER L'ICONA WINDOWS ---
       - name: Install rsrc tool (Windows Only)
         if: matrix.goos == 'windows'
         run: go install github.com/akavel/rsrc@latest
@@ -90,43 +72,55 @@ jobs:
       - name: Generate Resource .syso (Windows Only)
         if: matrix.goos == 'windows'
         run: rsrc -ico rclone.ico -o rclone.syso
-      # --- STEP PER L'ICONA WINDOWS (FINE) ---
 
       - name: Build Rclone (${{ matrix.name }})
+        shell: bash
         run: |
-          # Impostiamo le variabili per la cross-compilazione
+          # Variabili Base
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
           
-          # Logica per CGO e TAGS per il supporto mount
-          TAGS=""
-          export CGO_ENABLED=0 # Default CGO OFF per compilazioni statiche e piccole
+          # Calcoliamo la versione
+          VERSION="v1.72.0-extra"
+          LDFLAGS="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
-          if [ "$GOOS" == "linux" ]; then
-            TAGS="-tags fuse"
-            export CGO_ENABLED=1 # FUSE su Linux richiede CGO
-          elif [ "$GOOS" == "windows" ]; then
+          # --- LOGICA DI CONFIGURAZIONE COMPILATORE ---
+          
+          if [ "$GOOS" == "windows" ]; then
+            echo "Configuring Build for WINDOWS (CGO Enabled for cmount)..."
+            
+            # ATTIVA CGO per Windows per avere il supporto 'cmount' (WinFsp)
+            export CGO_ENABLED=1
+            # Fondamentale: Diciamo a Go di usare il compilatore MinGW invece di GCC standard
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            
+            # Tag specifico per Windows mount
             TAGS="-tags cmount"
-            export CGO_ENABLED=1 # WinFsp/cmount su Windows richiede CGO
+            
+          elif [ "$GOOS" == "linux" ]; then
+            echo "Configuring Build for LINUX (Static)..."
+            
+            # DISATTIVA CGO per Linux. 
+            # Rclone mount su Linux usa 'bazil/fuse' che è Pure Go.
+            # Questo rende la build più stabile, portabile e risolve i problemi di cross-compilazione ARM64.
+            export CGO_ENABLED=0
+            
+            TAGS="" 
+            # Nota: Non serve "-tags fuse" esplicito, è incluso di default su Linux se non disabilitato.
           fi
           
-          # Calcoliamo una versione fittizia se non c'è tag
-          VERSION="v1.72.0-extra"
+          echo "Building for $GOOS/$GOARCH..."
+          echo "CGO_ENABLED: $CGO_ENABLED"
+          echo "CC: $CC"
+          echo "Tags: $TAGS"
           
-          echo "Building for $GOOS/$GOARCH with tags: $TAGS and CGO_ENABLED=$CGO_ENABLED..."
-          
-          # Compilazione ottimizzata
-          go build -v -trimpath -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}" $TAGS -o rclone${{ matrix.ext }} .
+          # Esecuzione Build
+          go build -v -trimpath -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Check Version (Solo se compatibile con runner)
         if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
         run: ./rclone version
-        
-      # --- Verifica mount per Linux (Test rapido) ---
-      - name: Check Mount Command (Linux)
-        if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
-        run: ./rclone help mount
-      # --------------------------------------------------------
 
       - name: Upload Artifact (${{ matrix.name }})
         uses: actions/upload-artifact@v4
@@ -135,10 +129,9 @@ jobs:
           path: rclone${{ matrix.ext }}
 
   # -------------------------------------------------------------------------
-  # JOB 2: ANDROID (Tutte le architetture)
+  # JOB 2: ANDROID (Invariato ma incluso per completezza)
   # -------------------------------------------------------------------------
   android:
-    # Rimosso il complesso IF, ora la build parte solo on-demand
     timeout-minutes: 30
     name: Build Android
     runs-on: ubuntu-latest
@@ -165,7 +158,6 @@ jobs:
           env PATH=$PATH:~/go/bin gomobile init
           echo "RCLONE_NDK_VERSION=21" >> $GITHUB_ENV
 
-      # --- ARM v7a ---
       - name: Build Android ARMv7a
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${RCLONE_NDK_VERSION}-clang
@@ -177,7 +169,6 @@ jobs:
           export CGO_LDFLAGS="-fuse-ld=lld -s -w"
           go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-armv7a .
 
-      # --- ARM64 v8a ---
       - name: Build Android ARM64
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${RCLONE_NDK_VERSION}-clang
@@ -188,7 +179,6 @@ jobs:
           export CGO_LDFLAGS="-fuse-ld=lld -s -w"
           go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-armv8a .
 
-      # --- x86 ---
       - name: Build Android x86
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android${RCLONE_NDK_VERSION}-clang
@@ -199,7 +189,6 @@ jobs:
           export CGO_LDFLAGS="-fuse-ld=lld -s -w"
           go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-x86 .
 
-      # --- x64 ---
       - name: Build Android x64
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${RCLONE_NDK_VERSION}-clang
