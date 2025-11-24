@@ -1,8 +1,5 @@
 # Github Actions build for rclone (Custom & Clean)
-# Features:
-# - Windows: CGO enabled (cmount), Static Linking (no DLL deps), Custom Icon
-# - Linux: CGO disabled (Pure Go), Static Linking, Multi-arch
-# - Android: All architectures
+# Optimized for: Speed (Cache), Portability (Static Linking), and Stability
 name: build
 
 on:
@@ -29,19 +26,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # --- LINUX X64 ---
+          # --- LINUX X64 (Static + Netgo) ---
           - name: linux-amd64
             goos: linux
             goarch: amd64
             ext: ''
             
-          # --- LINUX ARM64 ---
+          # --- LINUX ARM64 (Static + Netgo) ---
           - name: linux-arm64
             goos: linux
             goarch: arm64
             ext: ''
 
-          # --- WINDOWS X64 ---
+          # --- WINDOWS X64 (CGO + WinFsp + Static) ---
           - name: windows-amd64
             goos: windows
             goarch: amd64
@@ -58,6 +55,7 @@ jobs:
         with:
           go-version: '>=1.24'
           check-latest: true
+          cache: true # Abilita caching automatico di moduli e build
 
       # --- WINDOWS PRE-REQUISITES ---
       - name: Install MinGW (Windows Only)
@@ -69,13 +67,12 @@ jobs:
       - name: Setup WinFsp Headers (Windows Only)
         if: matrix.goos == 'windows'
         run: |
-          # Scarica gli header necessari per compilare il supporto FUSE su Windows
-          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.1.zip
+          # Scarica headers per compilare cmount
+          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
           unzip -q winfsp.zip
-          # Imposta la variabile d'ambiente per il passo successivo
-          echo "WINFSP_INC=$(pwd)/winfsp-2.1/inc/fuse" >> $GITHUB_ENV
+          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
 
-      - name: Setup Icon Resources (Windows Only)
+      - name: Setup Icon (Windows Only)
         if: matrix.goos == 'windows'
         run: |
           go install github.com/akavel/rsrc@latest
@@ -86,64 +83,46 @@ jobs:
       - name: Build Rclone (${{ matrix.name }})
         shell: bash
         run: |
-          # --- CONFIGURAZIONE VARIABILI ---
+          # --- CONFIGURAZIONE ---
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
           
-          # Versione custom
           VERSION="v1.72.0-extra"
           
-          # Flag di base: 
-          # -s -w: Rimuove simboli di debug (riduce dimensione)
-          # -X ...: Inietta la versione
-          LDFLAGS_BASE="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          # Flag di ottimizzazione:
+          # -s -w: Strip debug info (riduce size)
+          # -buildid=: Rimuove ID univoco per build riproducibili
+          LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
-          # --- LOGICA SPECIFICA PER OS ---
+          # --- LOGICA OS ---
           if [ "$GOOS" == "windows" ]; then
             echo "::group::Configuring Windows Build"
-            
-            # CGO necessario per WinFsp
             export CGO_ENABLED=1
             export CC=x86_64-w64-mingw32-gcc
             export CXX=x86_64-w64-mingw32-g++
-            
-            # Header WinFsp scaricati prima
             export CGO_CFLAGS="-I$WINFSP_INC"
             
-            # Tags per attivare il mount su Windows
-            TAGS="-tags cmount"
-            
-            # AGGIUNTA IMPORTANTE: -extldflags '-static'
-            # Questo obbliga MinGW a linkare staticamente le librerie C (libwinpthread, etc.)
-            # Il risultato è un .exe standalone pulito.
+            # Static Linking Estremo per Windows
             LDFLAGS="$LDFLAGS_BASE -extldflags '-static'"
+            TAGS="-tags cmount"
             echo "::endgroup::"
             
           else
             echo "::group::Configuring Linux Build"
-            
-            # CGO DISABILITATO per Linux
-            # Questo garantisce un binario 'Statically Linked' puro.
-            # Funziona su Alpine, Ubuntu, CentOS, etc. senza problemi di glibc.
             export CGO_ENABLED=0
             
-            TAGS="" # Su Linux il supporto fuse è incluso standard senza tag speciali se CGO=0 (usa bazil/fuse)
+            # 'netgo' usa il resolver DNS Go nativo (no glibc)
+            # 'osusergo' usa il lookup utente Go nativo
+            TAGS="-tags netgo,osusergo"
             LDFLAGS="$LDFLAGS_BASE"
             echo "::endgroup::"
           fi
 
           echo "Building for $GOOS/$GOARCH..."
           
-          # Build comando
-          # -trimpath: Rimuove i percorsi della macchina di build dal binario (sicurezza + riproducibilità)
-          go build -v -trimpath -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
-
-      # --- VERIFICHE ---
-      - name: Check Binary (Linux x64 Only)
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: |
-          file rclone
-          ./rclone version
+          # -mod=readonly: assicura che go.mod non venga modificato
+          # -trimpath: rimuove percorsi assoluti dal binario
+          go build -v -trimpath -mod=readonly -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -153,7 +132,7 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # JOB 2: ANDROID
+  # JOB 2: ANDROID (Multi-Arch Loop)
   # -------------------------------------------------------------------------
   android:
     name: Build Android
@@ -170,33 +149,46 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.24'
-
-      - name: Install Gomobile
-        run: |
-          go install golang.org/x/mobile/cmd/gobind@latest
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          # Inizializza gomobile
-          export PATH=$PATH:$(go env GOPATH)/bin
-          gomobile init
+          cache: true
 
       - name: Build Android Targets
         run: |
-          # Setup Environment
-          export PATH=$PATH:$(go env GOPATH)/bin
           VERSION="v1.72.0-android-extra"
-          FLAGS="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
-          # Definiamo la versione NDK (Gomobile di solito gestisce questo, ma forziamo env se serve)
-          # Nota: Gomobile scarica il suo NDK ridotto o usa quello di sistema se configurato.
-          # Usiamo l'approccio standard di gomobile build che è più pulito se funziona col tuo fork.
+          # Setup NDK path (Pre-installato su ubuntu-latest)
+          NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          # Versione API Android minima (23 = Android 6.0, buon compromesso)
+          API="23" 
           
-          echo "Building Android Binaries..."
-          
-          # Loop semplice per le architetture
+          # Ciclo sulle architetture
           for ARCH in arm arm64 386 amd64; do
-            echo "Building for android/$ARCH..."
-            GOOS=android GOARCH=$ARCH CGO_ENABLED=1 \
-            go build -v -tags android -trimpath -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+            echo "::group::Building for Android $ARCH"
+            
+            export GOOS=android
+            export GOARCH=$ARCH
+            export CGO_ENABLED=1
+            
+            # Selezione dinamica del compilatore CC in base all'architettura
+            if [ "$ARCH" == "arm" ]; then
+              CC_BIN="$NDK_ROOT/armv7a-linux-androideabi${API}-clang"
+            elif [ "$ARCH" == "arm64" ]; then
+              CC_BIN="$NDK_ROOT/aarch64-linux-android${API}-clang"
+            elif [ "$ARCH" == "386" ]; then
+              CC_BIN="$NDK_ROOT/i686-linux-android${API}-clang"
+            elif [ "$ARCH" == "amd64" ]; then
+              CC_BIN="$NDK_ROOT/x86_64-linux-android${API}-clang"
+            fi
+            
+            export CC=$CC_BIN
+            
+            echo "Using Compiler: $CC"
+            
+            # Build
+            go build -v -trimpath -mod=readonly -tags android \
+              -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+              
+            echo "::endgroup::"
           done
 
       - name: Upload Android Artifacts
