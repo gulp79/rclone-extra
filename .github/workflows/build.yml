@@ -3,7 +3,6 @@
 # - Windows: CGO enabled (cmount), Static Linking (no DLL deps), Custom Icon
 # - Linux: CGO disabled (Pure Go), Static Linking, Multi-arch
 # - Android: All architectures
-
 name: build
 
 on:
@@ -57,35 +56,24 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.25'
+          go-version: '>=1.24'
           check-latest: true
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       # --- WINDOWS PRE-REQUISITES ---
       - name: Install MinGW (Windows Only)
         if: matrix.goos == 'windows'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends mingw-w64 unzip wget curl
-          sudo apt-get clean
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
 
       - name: Setup WinFsp Headers (Windows Only)
         if: matrix.goos == 'windows'
         run: |
           # Scarica gli header necessari per compilare il supporto FUSE su Windows
-          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.1.zip
+          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
           unzip -q winfsp.zip
           # Imposta la variabile d'ambiente per il passo successivo
-          echo "WINFSP_INC=$(pwd)/winfsp-2.1/inc/fuse" >> $GITHUB_ENV
+          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
 
       - name: Setup Icon Resources (Windows Only)
         if: matrix.goos == 'windows'
@@ -104,12 +92,11 @@ jobs:
           
           # Versione custom
           VERSION="v1.72.0-extra"
-          GOFLAGS="-trimpath -mod=readonly"
           
           # Flag di base: 
           # -s -w: Rimuove simboli di debug (riduce dimensione)
           # -X ...: Inietta la versione
-          LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          LDFLAGS_BASE="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
           # --- LOGICA SPECIFICA PER OS ---
           if [ "$GOOS" == "windows" ]; then
@@ -139,7 +126,6 @@ jobs:
             # Questo garantisce un binario 'Statically Linked' puro.
             # Funziona su Alpine, Ubuntu, CentOS, etc. senza problemi di glibc.
             export CGO_ENABLED=0
-            TAGS="-tags netgo"
             
             TAGS="" # Su Linux il supporto fuse è incluso standard senza tag speciali se CGO=0 (usa bazil/fuse)
             LDFLAGS="$LDFLAGS_BASE"
@@ -150,7 +136,7 @@ jobs:
           
           # Build comando
           # -trimpath: Rimuove i percorsi della macchina di build dal binario (sicurezza + riproducibilità)
-          go build -v $GOFLAGS $TAGS -ldflags "$LDFLAGS" -o rclone${{ matrix.ext }} .
+          go build -v -trimpath -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
 
       # --- VERIFICHE ---
       - name: Check Binary (Linux x64 Only)
@@ -162,7 +148,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rclone-${{ matrix.name }}-${{ github.run_number }}
+          name: rclone-${{ matrix.name }}
           path: rclone${{ matrix.ext }}
           if-no-files-found: error
 
@@ -185,16 +171,6 @@ jobs:
         with:
           go-version: '>=1.24'
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
       - name: Install Gomobile
         run: |
           go install golang.org/x/mobile/cmd/gobind@latest
@@ -208,7 +184,7 @@ jobs:
           # Setup Environment
           export PATH=$PATH:$(go env GOPATH)/bin
           VERSION="v1.72.0-android-extra"
-          FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          FLAGS="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
           # Definiamo la versione NDK (Gomobile di solito gestisce questo, ma forziamo env se serve)
           # Nota: Gomobile scarica il suo NDK ridotto o usa quello di sistema se configurato.
@@ -220,11 +196,11 @@ jobs:
           for ARCH in arm arm64 386 amd64; do
             echo "Building for android/$ARCH..."
             GOOS=android GOARCH=$ARCH CGO_ENABLED=1 \
-            GOOS=android GOARCH=$ARCH CGO_ENABLED=1             go build -v -tags android -trimpath -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+            go build -v -tags android -trimpath -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
           done
 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rclone-android-all-${{ github.run_number }}
+          name: rclone-android-all
           path: build/rclone-android-*
