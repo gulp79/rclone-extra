@@ -1,5 +1,9 @@
 # Github Actions build for rclone (Custom & Clean)
-# Optimized for: Speed (Cache), Portability (Static Linking), and Stability
+# Status: PRODUCTION
+# Features:
+# - Windows: CGO enabled (cmount), FULL STATIC LINKING (No DLLs), Custom Icon
+# - Linux: Pure Static (netgo), Multi-arch
+# - Android: Multi-arch, Auto-NDK selection
 name: build
 
 on:
@@ -15,7 +19,7 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------------
-  # JOB 1: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64)
+  # JOB 1: DESKTOP & SERVER
   # -------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.name }}
@@ -26,19 +30,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # --- LINUX X64 (Static + Netgo) ---
           - name: linux-amd64
             goos: linux
             goarch: amd64
             ext: ''
-            
-          # --- LINUX ARM64 (Static + Netgo) ---
           - name: linux-arm64
             goos: linux
             goarch: arm64
             ext: ''
-
-          # --- WINDOWS X64 (CGO + WinFsp + Static) ---
           - name: windows-amd64
             goos: windows
             goarch: amd64
@@ -55,7 +54,7 @@ jobs:
         with:
           go-version: '>=1.24'
           check-latest: true
-          cache: true # Abilita caching automatico di moduli e build
+          cache: true
 
       # --- WINDOWS PRE-REQUISITES ---
       - name: Install MinGW (Windows Only)
@@ -67,7 +66,6 @@ jobs:
       - name: Setup WinFsp Headers (Windows Only)
         if: matrix.goos == 'windows'
         run: |
-          # Scarica headers per compilare cmount
           wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
           unzip -q winfsp.zip
           echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
@@ -79,40 +77,45 @@ jobs:
           curl -L https://raw.githubusercontent.com/rclone/rclone/master/graphics/logo/ico/logo_symbol_color.ico -o rclone.ico
           rsrc -ico rclone.ico -o rclone.syso
 
-      # --- BUILD STEP OTTIMIZZATO ---
+      # --- BUILD STEP ---
       - name: Build Rclone (${{ matrix.name }})
         shell: bash
         run: |
-          # --- CONFIGURAZIONE ---
+          # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          
           VERSION="v1.72.0-extra"
           
-          # Flag di ottimizzazione:
-          # -s -w: Strip debug info (riduce size)
-          # -buildid=: Rimuove ID univoco per build riproducibili
+          # Flag Base: Strip debug (-s -w) e Versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
-          # --- LOGICA OS ---
+          # --- LOGICA SPECIFICA OS ---
           if [ "$GOOS" == "windows" ]; then
-            echo "::group::Configuring Windows Build"
+            echo "::group::Configuring Windows STATIC Build"
+            
+            # 1. Configura Compilatore C (MinGW)
             export CGO_ENABLED=1
             export CC=x86_64-w64-mingw32-gcc
             export CXX=x86_64-w64-mingw32-g++
+            
+            # 2. Header per WinFsp
             export CGO_CFLAGS="-I$WINFSP_INC"
             
-            # Static Linking Estremo per Windows
-            LDFLAGS="$LDFLAGS_BASE -extldflags '-static'"
+            # 3. FORZA LINKING STATICO SUL LATO C
+            # Questo obbliga GCC a non usare versioni dinamiche delle lib interne
+            export CGO_LDFLAGS="-static"
+            
+            # 4. Configura Linker Go
+            # -extldflags '-static': Passa static al linker esterno
+            # Aggiungiamo esplicitamente -static-libgcc per sicurezza
+            LDFLAGS="$LDFLAGS_BASE -extldflags '-static -static-libgcc -static-libstdc++'"
+            
             TAGS="-tags cmount"
             echo "::endgroup::"
             
           else
-            echo "::group::Configuring Linux Build"
+            echo "::group::Configuring Linux Pure-Static Build"
             export CGO_ENABLED=0
-            
-            # 'netgo' usa il resolver DNS Go nativo (no glibc)
-            # 'osusergo' usa il lookup utente Go nativo
             TAGS="-tags netgo,osusergo"
             LDFLAGS="$LDFLAGS_BASE"
             echo "::endgroup::"
@@ -120,8 +123,7 @@ jobs:
 
           echo "Building for $GOOS/$GOARCH..."
           
-          # -mod=readonly: assicura che go.mod non venga modificato
-          # -trimpath: rimuove percorsi assoluti dal binario
+          # Esecuzione Build
           go build -v -trimpath -mod=readonly -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Upload Artifact
@@ -132,7 +134,7 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
-  # JOB 2: ANDROID (Multi-Arch Loop)
+  # JOB 2: ANDROID
   # -------------------------------------------------------------------------
   android:
     name: Build Android
@@ -156,12 +158,10 @@ jobs:
           VERSION="v1.72.0-android-extra"
           FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
-          # Setup NDK path (Pre-installato su ubuntu-latest)
+          # Configurazione NDK
           NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          # Versione API Android minima (23 = Android 6.0, buon compromesso)
           API="23" 
           
-          # Ciclo sulle architetture
           for ARCH in arm arm64 386 amd64; do
             echo "::group::Building for Android $ARCH"
             
@@ -169,7 +169,7 @@ jobs:
             export GOARCH=$ARCH
             export CGO_ENABLED=1
             
-            # Selezione dinamica del compilatore CC in base all'architettura
+            # Selezione Compilatore NDK Corretto
             if [ "$ARCH" == "arm" ]; then
               CC_BIN="$NDK_ROOT/armv7a-linux-androideabi${API}-clang"
             elif [ "$ARCH" == "arm64" ]; then
@@ -182,9 +182,6 @@ jobs:
             
             export CC=$CC_BIN
             
-            echo "Using Compiler: $CC"
-            
-            # Build
             go build -v -trimpath -mod=readonly -tags android \
               -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
               
