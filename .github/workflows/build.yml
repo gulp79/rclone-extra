@@ -138,12 +138,12 @@ jobs:
           path: rclone${{ matrix.ext }}
 
   # -------------------------------------------------------------------------
-  # JOB 2: ANDROID (Invariato)
+  # JOB 2: ANDROID
   # -------------------------------------------------------------------------
   android:
-    timeout-minutes: 30
     name: Build Android
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -156,60 +156,35 @@ jobs:
         with:
           go-version: '>=1.24'
 
-      - name: Set global environment variables
-        run: |
-          echo "VERSION=$(make version)" >> $GITHUB_ENV
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
-      - name: Install Gomobile tools
+      - name: Install Gomobile
         run: |
           go install golang.org/x/mobile/cmd/gobind@latest
           go install golang.org/x/mobile/cmd/gomobile@latest
-          env PATH=$PATH:~/go/bin gomobile init
-          echo "RCLONE_NDK_VERSION=21" >> $GITHUB_ENV
+          export PATH=$PATH:$(go env GOPATH)/bin
+          gomobile init
 
-      - name: Build Android ARMv7a
+      - name: Build Android Targets
         run: |
-          export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${RCLONE_NDK_VERSION}-clang
-          export CC_FOR_TARGET=$CC
-          export GOOS=android
-          export GOARCH=arm
-          export GOARM=7
-          export CGO_ENABLED=1
-          export CGO_LDFLAGS="-fuse-ld=lld -s -w"
-          go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-armv7a .
+          export PATH=$PATH:$(go env GOPATH)/bin
+          VERSION="v1.72.0-android-extra"
+          FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          for ARCH in arm arm64 386 amd64; do
+            echo "Building for android/$ARCH..."
+            GOOS=android GOARCH=$ARCH CGO_ENABLED=1             go build -v -tags android -trimpath -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+          done
 
-      - name: Build Android ARM64
-        run: |
-          export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${RCLONE_NDK_VERSION}-clang
-          export CC_FOR_TARGET=$CC
-          export GOOS=android
-          export GOARCH=arm64
-          export CGO_ENABLED=1
-          export CGO_LDFLAGS="-fuse-ld=lld -s -w"
-          go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-armv8a .
-
-      - name: Build Android x86
-        run: |
-          export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android${RCLONE_NDK_VERSION}-clang
-          export CC_FOR_TARGET=$CC
-          export GOOS=android
-          export GOARCH=386
-          export CGO_ENABLED=1
-          export CGO_LDFLAGS="-fuse-ld=lld -s -w"
-          go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-x86 .
-
-      - name: Build Android x64
-        run: |
-          export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${RCLONE_NDK_VERSION}-clang
-          export CC_FOR_TARGET=$CC
-          export GOOS=android
-          export GOARCH=amd64
-          export CGO_ENABLED=1
-          export CGO_LDFLAGS="-fuse-ld=lld -s -w"
-          go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-x64 .
- 
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rclone-android-all
+          name: rclone-android-all-${{ github.run_number }}
           path: build/rclone-android-*
