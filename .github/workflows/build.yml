@@ -25,8 +25,7 @@ jobs:
   # JOB 1: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64)
   # -------------------------------------------------------------------------
   build:
-    # MODIFICATO: Rimosso il complesso IF, ora la build parte solo on-demand
-    #if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
+    # Rimosso il complesso IF, ora la build parte solo on-demand
     timeout-minutes: 60
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -65,12 +64,18 @@ jobs:
           go-version: '>=1.24'
           check-latest: true
 
-      # --- AGGIUNTO: Installazione dipendenze di sistema per FUSE/WinFsp (mount) ---
+      # --- AGGIUNTO/MODIFICATO: Installazione dipendenze di sistema per CGO ---
       - name: Install System Dependencies for CGO/Mount
         run: |
-          # Necessario per i compilatori C/C++ e libfuse-dev per il supporto mount su Linux
           sudo apt-get update
+          # Dipendenze base per CGO e FUSE su Linux AMD64
           sudo apt-get install -y gcc g++ libfuse-dev
+          
+          # AGGIUNTO: Toolchain per Cross-Compilazione Windows (mingw-w64)
+          sudo apt-get install -y mingw-w64
+          
+          # AGGIUNTO: Toolchain per Cross-Compilazione Linux ARM64 (aarch64)
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       # -----------------------------------------------------------------------------
           
       # --- STEP PER L'ICONA WINDOWS (INIZIO) ---
@@ -93,7 +98,7 @@ jobs:
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
           
-          # AGGIUNTO: Logica per CGO e TAGS per il supporto mount
+          # Logica per CGO e TAGS per il supporto mount
           TAGS=""
           export CGO_ENABLED=0 # Default CGO OFF per compilazioni statiche e piccole
           
@@ -111,14 +116,13 @@ jobs:
           echo "Building for $GOOS/$GOARCH with tags: $TAGS and CGO_ENABLED=$CGO_ENABLED..."
           
           # Compilazione ottimizzata
-          # Usiamo $TAGS per includere fuse/cmount
           go build -v -trimpath -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Check Version (Solo se compatibile con runner)
         if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
         run: ./rclone version
         
-      # --- AGGIUNTO: Verifica mount per Linux (Test rapido) ---
+      # --- Verifica mount per Linux (Test rapido) ---
       - name: Check Mount Command (Linux)
         if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
         run: ./rclone help mount
@@ -134,8 +138,7 @@ jobs:
   # JOB 2: ANDROID (Tutte le architetture)
   # -------------------------------------------------------------------------
   android:
-    # MODIFICATO: Rimosso il complesso IF, ora la build parte solo on-demand
-    #if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
+    # Rimosso il complesso IF, ora la build parte solo on-demand
     timeout-minutes: 30
     name: Build Android
     runs-on: ubuntu-latest
