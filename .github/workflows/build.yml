@@ -70,10 +70,10 @@ jobs:
         if: matrix.goos == 'windows'
         run: |
           # Scarica gli header necessari per compilare il supporto FUSE su Windows
-          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
+          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.1.zip
           unzip -q winfsp.zip
           # Imposta la variabile d'ambiente per il passo successivo
-          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
+          echo "WINFSP_INC=$(pwd)/winfsp-2.1/inc/fuse" >> $GITHUB_ENV
 
       - name: Setup Icon Resources (Windows Only)
         if: matrix.goos == 'windows'
