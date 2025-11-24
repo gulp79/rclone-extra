@@ -1,17 +1,8 @@
----
 # Github Actions build for rclone (Custom & Clean)
-# Include: Linux x64, Linux ARM64, Windows x64 (With Icon), Android
-# Exclude: Tests, Lint, Other OS
-
+# Fixes: Windows Mount (Missing fuse_common.h), Linux Cross-Compile
 name: build
 
 on:
-  push:
-    branches:
-      - '**'
-    tags:
-      - '**'
-  pull_request:
   workflow_dispatch:
     inputs:
       manual:
@@ -24,7 +15,6 @@ jobs:
   # JOB 1: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64)
   # -------------------------------------------------------------------------
   build:
-    if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 60
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -33,19 +23,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # --- LINUX X64 (Standard) ---
+          # --- LINUX X64 ---
           - name: linux-amd64
             goos: linux
             goarch: amd64
             ext: ''
             
-          # --- LINUX ARM64 (Aarch64 - Raspberry Pi / Oracle ARM) ---
+          # --- LINUX ARM64 ---
           - name: linux-arm64
             goos: linux
             goarch: arm64
             ext: ''
 
-          # --- WINDOWS X64 (Con Icona) ---
+          # --- WINDOWS X64 (Richiede CGO + Headers WinFsp) ---
           - name: windows-amd64
             goos: windows
             goarch: amd64
@@ -63,7 +53,27 @@ jobs:
           go-version: '>=1.24'
           check-latest: true
 
-      # --- STEP PER L'ICONA WINDOWS (INIZIO) ---
+      # --- Installazione Compilatori per CGO (Necessario per Windows) ---
+      - name: Install Cross-Compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+
+      # --- STEP AGGIUNTO: Scarica Headers WinFsp per Windows ---
+      # Senza questo, MinGW non trova fuse_common.h e la build fallisce
+      - name: Setup WinFsp Headers (Windows Only)
+        if: matrix.goos == 'windows'
+        run: |
+          echo "Downloading WinFsp headers..."
+          # Scarichiamo il codice sorgente di WinFsp (versione stabile)
+          wget -q https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip -O winfsp.zip
+          unzip -q winfsp.zip
+          
+          # Salviamo il percorso degli header in una variabile ambiente per il prossimo step
+          # Nota: puntiamo a 'inc/fuse' perché rclone si aspetta di trovare fuse_common.h nella root dell'include
+          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
+          
+      # --- STEP PER L'ICONA WINDOWS ---
       - name: Install rsrc tool (Windows Only)
         if: matrix.goos == 'windows'
         run: go install github.com/akavel/rsrc@latest
@@ -75,23 +85,47 @@ jobs:
       - name: Generate Resource .syso (Windows Only)
         if: matrix.goos == 'windows'
         run: rsrc -ico rclone.ico -o rclone.syso
-      # --- STEP PER L'ICONA WINDOWS (FINE) ---
 
       - name: Build Rclone (${{ matrix.name }})
+        shell: bash
         run: |
-          # Impostiamo le variabili per la cross-compilazione
+          # Variabili Base
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          export CGO_ENABLED=0
           
-          # Calcoliamo una versione fittizia se non c'è tag
+          # Calcoliamo la versione
           VERSION="v1.72.0-extra"
+          LDFLAGS="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          
+          # --- LOGICA DI CONFIGURAZIONE COMPILATORE ---
+          
+          if [ "$GOOS" == "windows" ]; then
+            echo "Configuring Build for WINDOWS (CGO Enabled for cmount)..."
+            
+            export CGO_ENABLED=1
+            export CC=x86_64-w64-mingw32-gcc
+            export CXX=x86_64-w64-mingw32-g++
+            
+            # --- PUNTO CRUCIALE: Diciamo a CGO dove trovare fuse_common.h ---
+            # Usiamo la variabile impostata nello step precedente
+            export CGO_CFLAGS="-I$WINFSP_INC"
+            
+            TAGS="-tags cmount"
+            
+          elif [ "$GOOS" == "linux" ]; then
+            echo "Configuring Build for LINUX (Static)..."
+            # CGO OFF per Linux garantisce compatibilità e risolve problemi ARM64
+            export CGO_ENABLED=0
+            TAGS="" 
+          fi
           
           echo "Building for $GOOS/$GOARCH..."
+          echo "CGO_ENABLED: $CGO_ENABLED"
+          echo "CC: $CC"
+          echo "CGO_CFLAGS: $CGO_CFLAGS"
           
-          # Compilazione ottimizzata (senza debug info per file più piccoli)
-          # Nota: Se presente rclone.syso (creato sopra), Go lo include automaticamente su Windows
-          go build -v -trimpath -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}" -o rclone${{ matrix.ext }} .
+          # Esecuzione Build
+          go build -v -trimpath -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Check Version (Solo se compatibile con runner)
         if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
@@ -104,10 +138,9 @@ jobs:
           path: rclone${{ matrix.ext }}
 
   # -------------------------------------------------------------------------
-  # JOB 2: ANDROID (Tutte le architetture)
+  # JOB 2: ANDROID (Invariato)
   # -------------------------------------------------------------------------
   android:
-    if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 30
     name: Build Android
     runs-on: ubuntu-latest
@@ -134,7 +167,6 @@ jobs:
           env PATH=$PATH:~/go/bin gomobile init
           echo "RCLONE_NDK_VERSION=21" >> $GITHUB_ENV
 
-      # --- ARM v7a ---
       - name: Build Android ARMv7a
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${RCLONE_NDK_VERSION}-clang
@@ -146,7 +178,6 @@ jobs:
           export CGO_LDFLAGS="-fuse-ld=lld -s -w"
           go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-armv7a .
 
-      # --- ARM64 v8a ---
       - name: Build Android ARM64
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${RCLONE_NDK_VERSION}-clang
@@ -157,7 +188,6 @@ jobs:
           export CGO_LDFLAGS="-fuse-ld=lld -s -w"
           go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-armv8a .
 
-      # --- x86 ---
       - name: Build Android x86
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android${RCLONE_NDK_VERSION}-clang
@@ -168,7 +198,6 @@ jobs:
           export CGO_LDFLAGS="-fuse-ld=lld -s -w"
           go build -v -tags android -trimpath -ldflags "-s -X github.com/rclone/rclone/fs.Version=${VERSION}" -o build/rclone-android-${RCLONE_NDK_VERSION}-x86 .
 
-      # --- x64 ---
       - name: Build Android x64
         run: |
           export CC=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${RCLONE_NDK_VERSION}-clang
