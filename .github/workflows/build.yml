@@ -6,12 +6,13 @@
 name: build
 
 on:
-  push:
-    branches:
-      - '**'
-    tags:
-      - '**'
-  pull_request:
+# --- MODIFICATO: Rimosso push e pull_request per l'avvio manuale ---
+#   push:
+#     branches:
+#       - '**'
+#     tags:
+#       - '**'
+#   pull_request:
   workflow_dispatch:
     inputs:
       manual:
@@ -24,7 +25,8 @@ jobs:
   # JOB 1: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64)
   # -------------------------------------------------------------------------
   build:
-    if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
+    # MODIFICATO: Rimosso il complesso IF, ora la build parte solo on-demand
+    #if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 60
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -63,6 +65,14 @@ jobs:
           go-version: '>=1.24'
           check-latest: true
 
+      # --- AGGIUNTO: Installazione dipendenze di sistema per FUSE/WinFsp (mount) ---
+      - name: Install System Dependencies for CGO/Mount
+        run: |
+          # Necessario per i compilatori C/C++ e libfuse-dev per il supporto mount su Linux
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ libfuse-dev
+      # -----------------------------------------------------------------------------
+          
       # --- STEP PER L'ICONA WINDOWS (INIZIO) ---
       - name: Install rsrc tool (Windows Only)
         if: matrix.goos == 'windows'
@@ -82,20 +92,37 @@ jobs:
           # Impostiamo le variabili per la cross-compilazione
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          export CGO_ENABLED=0
+          
+          # AGGIUNTO: Logica per CGO e TAGS per il supporto mount
+          TAGS=""
+          export CGO_ENABLED=0 # Default CGO OFF per compilazioni statiche e piccole
+          
+          if [ "$GOOS" == "linux" ]; then
+            TAGS="-tags fuse"
+            export CGO_ENABLED=1 # FUSE su Linux richiede CGO
+          elif [ "$GOOS" == "windows" ]; then
+            TAGS="-tags cmount"
+            export CGO_ENABLED=1 # WinFsp/cmount su Windows richiede CGO
+          fi
           
           # Calcoliamo una versione fittizia se non c'è tag
           VERSION="v1.72.0-extra"
           
-          echo "Building for $GOOS/$GOARCH..."
+          echo "Building for $GOOS/$GOARCH with tags: $TAGS and CGO_ENABLED=$CGO_ENABLED..."
           
-          # Compilazione ottimizzata (senza debug info per file più piccoli)
-          # Nota: Se presente rclone.syso (creato sopra), Go lo include automaticamente su Windows
-          go build -v -trimpath -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}" -o rclone${{ matrix.ext }} .
+          # Compilazione ottimizzata
+          # Usiamo $TAGS per includere fuse/cmount
+          go build -v -trimpath -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Check Version (Solo se compatibile con runner)
         if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
         run: ./rclone version
+        
+      # --- AGGIUNTO: Verifica mount per Linux (Test rapido) ---
+      - name: Check Mount Command (Linux)
+        if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
+        run: ./rclone help mount
+      # --------------------------------------------------------
 
       - name: Upload Artifact (${{ matrix.name }})
         uses: actions/upload-artifact@v4
@@ -107,7 +134,8 @@ jobs:
   # JOB 2: ANDROID (Tutte le architetture)
   # -------------------------------------------------------------------------
   android:
-    if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
+    # MODIFICATO: Rimosso il complesso IF, ora la build parte solo on-demand
+    #if: inputs.manual || (github.repository == 'rclone/rclone' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name))
     timeout-minutes: 30
     name: Build Android
     runs-on: ubuntu-latest
