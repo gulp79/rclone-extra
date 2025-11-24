@@ -1,5 +1,5 @@
 # Github Actions build for rclone (Custom & Clean)
-# Fixes: Windows Mount (CGO/WinFsp), Linux Cross-Compile
+# Fixes: Windows Mount (Missing fuse_common.h), Linux Cross-Compile
 name: build
 
 on:
@@ -35,7 +35,7 @@ jobs:
             goarch: arm64
             ext: ''
 
-          # --- WINDOWS X64 (Richiede CGO per Mount) ---
+          # --- WINDOWS X64 (Richiede CGO + Headers WinFsp) ---
           - name: windows-amd64
             goos: windows
             goarch: amd64
@@ -57,8 +57,21 @@ jobs:
       - name: Install Cross-Compilers
         run: |
           sudo apt-get update
-          # MinGW-w64 è necessario per compilare rclone con CGO (cmount) per Windows su Linux
           sudo apt-get install -y mingw-w64
+
+      # --- STEP AGGIUNTO: Scarica Headers WinFsp per Windows ---
+      # Senza questo, MinGW non trova fuse_common.h e la build fallisce
+      - name: Setup WinFsp Headers (Windows Only)
+        if: matrix.goos == 'windows'
+        run: |
+          echo "Downloading WinFsp headers..."
+          # Scarichiamo il codice sorgente di WinFsp (versione stabile)
+          wget -q https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip -O winfsp.zip
+          unzip -q winfsp.zip
+          
+          # Salviamo il percorso degli header in una variabile ambiente per il prossimo step
+          # Nota: puntiamo a 'inc/fuse' perché rclone si aspetta di trovare fuse_common.h nella root dell'include
+          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
           
       # --- STEP PER L'ICONA WINDOWS ---
       - name: Install rsrc tool (Windows Only)
@@ -89,31 +102,27 @@ jobs:
           if [ "$GOOS" == "windows" ]; then
             echo "Configuring Build for WINDOWS (CGO Enabled for cmount)..."
             
-            # ATTIVA CGO per Windows per avere il supporto 'cmount' (WinFsp)
             export CGO_ENABLED=1
-            # Fondamentale: Diciamo a Go di usare il compilatore MinGW invece di GCC standard
             export CC=x86_64-w64-mingw32-gcc
             export CXX=x86_64-w64-mingw32-g++
             
-            # Tag specifico per Windows mount
+            # --- PUNTO CRUCIALE: Diciamo a CGO dove trovare fuse_common.h ---
+            # Usiamo la variabile impostata nello step precedente
+            export CGO_CFLAGS="-I$WINFSP_INC"
+            
             TAGS="-tags cmount"
             
           elif [ "$GOOS" == "linux" ]; then
             echo "Configuring Build for LINUX (Static)..."
-            
-            # DISATTIVA CGO per Linux. 
-            # Rclone mount su Linux usa 'bazil/fuse' che è Pure Go.
-            # Questo rende la build più stabile, portabile e risolve i problemi di cross-compilazione ARM64.
+            # CGO OFF per Linux garantisce compatibilità e risolve problemi ARM64
             export CGO_ENABLED=0
-            
             TAGS="" 
-            # Nota: Non serve "-tags fuse" esplicito, è incluso di default su Linux se non disabilitato.
           fi
           
           echo "Building for $GOOS/$GOARCH..."
           echo "CGO_ENABLED: $CGO_ENABLED"
           echo "CC: $CC"
-          echo "Tags: $TAGS"
+          echo "CGO_CFLAGS: $CGO_CFLAGS"
           
           # Esecuzione Build
           go build -v -trimpath -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
@@ -129,7 +138,7 @@ jobs:
           path: rclone${{ matrix.ext }}
 
   # -------------------------------------------------------------------------
-  # JOB 2: ANDROID (Invariato ma incluso per completezza)
+  # JOB 2: ANDROID (Invariato)
   # -------------------------------------------------------------------------
   android:
     timeout-minutes: 30
