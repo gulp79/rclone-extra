@@ -17,7 +17,7 @@
 [Contributing](CONTRIBUTING.md) |
 [Changelog](https://rclone.org/changelog/) |
 [Installation](https://rclone.org/install/) |
-[Forum](https://forum.rclone.org/)
+[Forum](https://forum.rclone.org/) |
 [bclone](https://github.com/BenjiThatFoxGuy/bclone)
 
 [![Build Status](https://github.com/rclone/rclone/workflows/build/badge.svg)](https://github.com/rclone/rclone/actions?query=workflow%3Abuild)
