@@ -1,8 +1,7 @@
 ![Downloads](https://img.shields.io/github/downloads/gulp79/rclone-extra/total?style=for-the-badge&labelColor=21262d&color=238636)
 
 > ⚠️ **Unofficial Fork Disclaimer**  
-> This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alldebrid**, **iCloud Photos**, **Teldrive** and **Terabox** support. 
-> All the backends are from [bclone](https://github.com/BenjiThatFoxGuy/bclone), i've just updated rclone to v1.72.0 official.
+> This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alldebrid**, **iCloud Photos**, **Teldrive** and **Terabox** support.
 > I am **not affiliated with the upstream maintainers**, and this fork **does not intend to be malicious or harmful** in any way.  
 > Please **read the source code** if you're unsure or want to verify that it behaves as described.  
 > Contributions, feedback, and scrutiny are welcome.
@@ -19,6 +18,7 @@
 [Changelog](https://rclone.org/changelog/) |
 [Installation](https://rclone.org/install/) |
 [Forum](https://forum.rclone.org/)
+[bclone](https://github.com/BenjiThatFoxGuy/bclone)
 
 [![Build Status](https://github.com/rclone/rclone/workflows/build/badge.svg)](https://github.com/rclone/rclone/actions?query=workflow%3Abuild)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rclone/rclone)](https://goreportcard.com/report/github.com/rclone/rclone)
