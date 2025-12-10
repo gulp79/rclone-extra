@@ -3,27 +3,13 @@
 # - Windows: CGO enabled (cmount), Static Linking (no DLL deps), Custom Icon
 # - Linux: CGO disabled (Pure Go), Static Linking, Multi-arch
 # - Android: All architectures
-name: build
+name: Build rclone-extra - Multi Platform
 
 on:
   workflow_dispatch:
-    inputs:
-      manual:
-        description: Manual run# Github Actions build for rclone (Custom & Clean)
-# Status: PRODUCTION
-# Features:
-# - Windows: CGO enabled (cmount), FULL STATIC LINKING (No DLLs), Custom Icon
-# - Linux: Pure Static (netgo), Multi-arch
-# - Android: Multi-arch, Auto-NDK selection
-name: build
-
-on:
-  workflow_dispatch:
-    inputs:
-      manual:
-        description: Manual run
-        type: boolean
-        default: true
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
