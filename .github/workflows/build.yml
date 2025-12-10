@@ -3,6 +3,7 @@
 # - Windows: CGO enabled (cmount), Static Linking (no DLL deps), Custom Icon
 # - Linux: CGO disabled (Pure Go), Static Linking, Multi-arch
 # - Android: All architectures
+
 name: Build rclone-extra - Multi Platform
 
 on:
