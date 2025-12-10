@@ -1,29 +1,46 @@
+
 # Github Actions build for rclone (Custom & Clean)
 # Features:
 # - Windows: CGO enabled (cmount), Static Linking (no DLL deps), Custom Icon
-# - Linux: CGO disabled (Pure Go), Static Linking, Multi-arch
+# - Linux:   CGO disabled (Pure Go), Static Linking, Multi-arch
 # - Android: All architectures
 
 name: Build rclone-extra - Multi Platform
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Seleziona cosa compilare"
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - linux
+          - windows
+          - android
   push:
     tags:
-      - 'v*'
+      - 'v*'                # run su tag tipo v1.72.0
 
 permissions:
   contents: read
 
 jobs:
-  # -------------------------------------------------------------------------
-  # JOB 1: DESKTOP & SERVER
-  # -------------------------------------------------------------------------
+
+  # --- JOB: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64) ---
   build:
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    
+
+    # Esegue solo se la scelta è 'all' oppure corrisponde all'OS della matrice
+    if: |
+      inputs.target == 'all' ||
+      (inputs.target == 'linux')   ||
+      (inputs.target == 'windows')
+
     strategy:
       fail-fast: false
       matrix:
@@ -41,35 +58,54 @@ jobs:
             goarch: amd64
             ext: '.exe'
 
+    # Filtra le combinazioni della matrice in base alla scelta UI
+    # (Se target == linux, si eseguono solo le righe con goos=linux; se windows, solo quelle windows)
+    continue-on-error: false
+
     steps:
+      - name: Skip non matching matrix rows
+        id: gate
+        run: |
+          TARGET="${{ inputs.target }}"
+          GOOS="${{ matrix.goos }}"
+          if [ "$TARGET" = "linux" ] && [ "$GOOS" != "linux" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          elif [ "$TARGET" = "windows" ] && [ "$GOOS" != "windows" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout
+        if: steps.gate.outputs.skip == 'false'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Install Go
+        if: steps.gate.outputs.skip == 'false'
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.24'
+          go-version: '1.24.x'
           check-latest: true
           cache: true
 
       # --- WINDOWS PRE-REQUISITES ---
       - name: Install MinGW (Windows Only)
-        if: matrix.goos == 'windows'
+        if: steps.gate.outputs.skip == 'false' && matrix.goos == 'windows'
         run: |
           sudo apt-get update
           sudo apt-get install -y mingw-w64
 
       - name: Setup WinFsp Headers (Windows Only)
-        if: matrix.goos == 'windows'
+        if: steps.gate.outputs.skip == 'false' && matrix.goos == 'windows'
         run: |
           wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
           unzip -q winfsp.zip
           echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
 
       - name: Setup Icon (Windows Only)
-        if: matrix.goos == 'windows'
+        if: steps.gate.outputs.skip == 'false' && matrix.goos == 'windows'
         run: |
           go install github.com/akavel/rsrc@latest
           curl -L https://raw.githubusercontent.com/rclone/rclone/master/graphics/logo/ico/logo_symbol_color.ico -o rclone.ico
@@ -77,40 +113,28 @@ jobs:
 
       # --- BUILD STEP ---
       - name: Build Rclone (${{ matrix.name }})
+        if: steps.gate.outputs.skip == 'false'
         shell: bash
         run: |
           # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
           VERSION="v1.72.0-extra"
-          
-          # Flag Base: Strip debug (-s -w) e Versione
+
+          # Flag base: strip debug (-s -w) e versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
-          
-          # --- LOGICA SPECIFICA OS ---
+
+          # --- Logica specifica OS ---
           if [ "$GOOS" == "windows" ]; then
             echo "::group::Configuring Windows STATIC Build"
-            
-            # 1. Configura Compilatore C (MinGW)
             export CGO_ENABLED=1
             export CC=x86_64-w64-mingw32-gcc
             export CXX=x86_64-w64-mingw32-g++
-            
-            # 2. Header per WinFsp
             export CGO_CFLAGS="-I$WINFSP_INC"
-            
-            # 3. FORZA LINKING STATICO SUL LATO C
-            # Questo obbliga GCC a non usare versioni dinamiche delle lib interne
             export CGO_LDFLAGS="-static"
-            
-            # 4. Configura Linker Go
-            # -extldflags '-static': Passa static al linker esterno
-            # Aggiungiamo esplicitamente -static-libgcc per sicurezza
             LDFLAGS="$LDFLAGS_BASE -extldflags '-static -static-libgcc -static-libstdc++'"
-            
             TAGS="-tags cmount"
             echo "::endgroup::"
-            
           else
             echo "::group::Configuring Linux Pure-Static Build"
             export CGO_ENABLED=0
@@ -120,24 +144,24 @@ jobs:
           fi
 
           echo "Building for $GOOS/$GOARCH..."
-          
-          # Esecuzione Build
           go build -v -trimpath -mod=readonly -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
 
       - name: Upload Artifact
+        if: steps.gate.outputs.skip == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: rclone-${{ matrix.name }}
           path: rclone${{ matrix.ext }}
           if-no-files-found: error
 
-  # -------------------------------------------------------------------------
-  # JOB 2: ANDROID
-  # -------------------------------------------------------------------------
+  # --- JOB: ANDROID ---
   android:
     name: Build Android
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    # Esegue solo se si è scelto 'all' o 'android'
+    if: inputs.target == 'all' || inputs.target == 'android'
 
     steps:
       - name: Checkout
@@ -148,237 +172,27 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.24'
+          go-version: '1.24.x'
           cache: true
-
-      - name: Build Android Targets
-        run: |
-          VERSION="v1.72.0-android-extra"
-          FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
-          
-          # Configurazione NDK
-          NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          API="23" 
-          
-          for ARCH in arm arm64 386 amd64; do
-            echo "::group::Building for Android $ARCH"
-            
-            export GOOS=android
-            export GOARCH=$ARCH
-            export CGO_ENABLED=1
-            
-            # Selezione Compilatore NDK Corretto
-            if [ "$ARCH" == "arm" ]; then
-              CC_BIN="$NDK_ROOT/armv7a-linux-androideabi${API}-clang"
-            elif [ "$ARCH" == "arm64" ]; then
-              CC_BIN="$NDK_ROOT/aarch64-linux-android${API}-clang"
-            elif [ "$ARCH" == "386" ]; then
-              CC_BIN="$NDK_ROOT/i686-linux-android${API}-clang"
-            elif [ "$ARCH" == "amd64" ]; then
-              CC_BIN="$NDK_ROOT/x86_64-linux-android${API}-clang"
-            fi
-            
-            export CC=$CC_BIN
-            
-            go build -v -trimpath -mod=readonly -tags android \
-              -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
-              
-            echo "::endgroup::"
-          done
-
-      - name: Upload Android Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: rclone-android-all
-          path: build/rclone-android-*
-
-        type: boolean
-        default: true
-
-permissions:
-  contents: read
-
-jobs:
-  # -------------------------------------------------------------------------
-  # JOB 1: DESKTOP & SERVER (Linux x64, Linux ARM64, Windows x64)
-  # -------------------------------------------------------------------------
-  build:
-    name: Build ${{ matrix.name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # --- LINUX X64 ---
-          - name: linux-amd64
-            goos: linux
-            goarch: amd64
-            ext: ''
-            
-          # --- LINUX ARM64 ---
-          - name: linux-arm64
-            goos: linux
-            goarch: arm64
-            ext: ''
-
-          # --- WINDOWS X64 ---
-          - name: windows-amd64
-            goos: windows
-            goarch: amd64
-            ext: '.exe'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '>=1.24'
-          check-latest: true
-
-      # --- WINDOWS PRE-REQUISITES ---
-      - name: Install MinGW (Windows Only)
-        if: matrix.goos == 'windows'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64
-
-      - name: Setup WinFsp Headers (Windows Only)
-        if: matrix.goos == 'windows'
-        run: |
-          # Scarica gli header necessari per compilare il supporto FUSE su Windows
-          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
-          unzip -q winfsp.zip
-          # Imposta la variabile d'ambiente per il passo successivo
-          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
-
-      - name: Setup Icon Resources (Windows Only)
-        if: matrix.goos == 'windows'
-        run: |
-          go install github.com/akavel/rsrc@latest
-          curl -L https://raw.githubusercontent.com/rclone/rclone/master/graphics/logo/ico/logo_symbol_color.ico -o rclone.ico
-          rsrc -ico rclone.ico -o rclone.syso
-
-      # --- BUILD STEP OTTIMIZZATO ---
-      - name: Build Rclone (${{ matrix.name }})
-        shell: bash
-        run: |
-          # --- CONFIGURAZIONE VARIABILI ---
-          export GOOS=${{ matrix.goos }}
-          export GOARCH=${{ matrix.goarch }}
-          
-          # Versione custom
-          VERSION="v1.72.0-extra"
-          
-          # Flag di base: 
-          # -s -w: Rimuove simboli di debug (riduce dimensione)
-          # -X ...: Inietta la versione
-          LDFLAGS_BASE="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
-          
-          # --- LOGICA SPECIFICA PER OS ---
-          if [ "$GOOS" == "windows" ]; then
-            echo "::group::Configuring Windows Build"
-            
-            # CGO necessario per WinFsp
-            export CGO_ENABLED=1
-            export CC=x86_64-w64-mingw32-gcc
-            export CXX=x86_64-w64-mingw32-g++
-            
-            # Header WinFsp scaricati prima
-            export CGO_CFLAGS="-I$WINFSP_INC"
-            
-            # Tags per attivare il mount su Windows
-            TAGS="-tags cmount"
-            
-            # AGGIUNTA IMPORTANTE: -extldflags '-static'
-            # Questo obbliga MinGW a linkare staticamente le librerie C (libwinpthread, etc.)
-            # Il risultato è un .exe standalone pulito.
-            LDFLAGS="$LDFLAGS_BASE -extldflags '-static'"
-            echo "::endgroup::"
-            
-          else
-            echo "::group::Configuring Linux Build"
-            
-            # CGO DISABILITATO per Linux
-            # Questo garantisce un binario 'Statically Linked' puro.
-            # Funziona su Alpine, Ubuntu, CentOS, etc. senza problemi di glibc.
-            export CGO_ENABLED=0
-            
-            TAGS="" # Su Linux il supporto fuse è incluso standard senza tag speciali se CGO=0 (usa bazil/fuse)
-            LDFLAGS="$LDFLAGS_BASE"
-            echo "::endgroup::"
-          fi
-
-          echo "Building for $GOOS/$GOARCH..."
-          
-          # Build comando
-          # -trimpath: Rimuove i percorsi della macchina di build dal binario (sicurezza + riproducibilità)
-          go build -v -trimpath -ldflags "$LDFLAGS" $TAGS -o rclone${{ matrix.ext }} .
-
-      # --- VERIFICHE ---
-      - name: Check Binary (Linux x64 Only)
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: |
-          file rclone
-          ./rclone version
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rclone-${{ matrix.name }}
-          path: rclone${{ matrix.ext }}
-          if-no-files-found: error
-
-  # -------------------------------------------------------------------------
-  # JOB 2: ANDROID
-  # -------------------------------------------------------------------------
-  android:
-    name: Build Android
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '>=1.24'
 
       - name: Install Gomobile
         run: |
           go install golang.org/x/mobile/cmd/gobind@latest
           go install golang.org/x/mobile/cmd/gomobile@latest
-          # Inizializza gomobile
           export PATH=$PATH:$(go env GOPATH)/bin
           gomobile init
 
       - name: Build Android Targets
         run: |
-          # Setup Environment
           export PATH=$PATH:$(go env GOPATH)/bin
           VERSION="v1.72.0-android-extra"
-          FLAGS="-s -w -X github.com/rclone/rclone/fs.Version=${VERSION}"
-          
-          # Definiamo la versione NDK (Gomobile di solito gestisce questo, ma forziamo env se serve)
-          # Nota: Gomobile scarica il suo NDK ridotto o usa quello di sistema se configurato.
-          # Usiamo l'approccio standard di gomobile build che è più pulito se funziona col tuo fork.
-          
-          echo "Building Android Binaries..."
-          
-          # Loop semplice per le architetture
+          FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          mkdir -p build
           for ARCH in arm arm64 386 amd64; do
-            echo "Building for android/$ARCH..."
+            echo "::group::Building for android/$ARCH"
             GOOS=android GOARCH=$ARCH CGO_ENABLED=1 \
-            go build -v -tags android -trimpath -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+              go build -v -tags android -trimpath -mod=readonly -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+            echo "::endgroup::"
           done
 
       - name: Upload Android Artifacts
@@ -386,3 +200,4 @@ jobs:
         with:
           name: rclone-android-all
           path: build/rclone-android-*
+          if-no-files-found: error
