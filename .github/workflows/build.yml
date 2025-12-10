@@ -86,7 +86,7 @@ jobs:
         if: steps.gate.outputs.skip == 'false'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.x'
           check-latest: true
           cache: true
 
@@ -172,7 +172,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.x'
           cache: true
 
       - name: Install Gomobile
@@ -184,14 +184,15 @@ jobs:
 
       - name: Build Android Targets
         run: |
+          set -euo pipefail
           export PATH=$PATH:$(go env GOPATH)/bin
           VERSION="v1.72.0-android-extra"
           FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
-          mkdir -p build
+          mkdir -p build build-logs
           for ARCH in arm arm64 386 amd64; do
             echo "::group::Building for android/$ARCH"
             GOOS=android GOARCH=$ARCH CGO_ENABLED=1 \
-              go build -v -tags android -trimpath -mod=readonly -ldflags "$FLAGS" -o build/rclone-android-$ARCH .
+              go build -v -tags android -trimpath -mod=readonly -ldflags "$FLAGS" -o build/rclone-android-$ARCH ./cmd/rclone 2>&1 | tee "build-logs/build-android-$ARCH.log"
             echo "::endgroup::"
           done
 
@@ -201,3 +202,11 @@ jobs:
           name: rclone-android-all
           path: build/rclone-android-*
           if-no-files-found: error
+          
+      - name: Upload Android build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-android
+          path: build-logs/build-android-*.log
+
