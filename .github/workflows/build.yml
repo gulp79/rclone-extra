@@ -160,7 +160,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Esegue solo se si è scelto 'all' o 'android'
     if: inputs.target == 'all' || inputs.target == 'android'
 
     steps:
@@ -184,15 +183,39 @@ jobs:
           
           mkdir -p build build-logs
           
-          # NOTA: Rimosso 'arm' dalla lista perché richiede CGO/NDK obbligatorio.
-          # Compila per le architetture Android supportate in Pure Go.
-          for ARCH in arm64 386 amd64; do
+          # --- CONFIGURAZIONE NDK (Necessaria per arm 32-bit) ---
+          # GitHub Actions Ubuntu include l'NDK. Lo usiamo per CGO.
+          NDK_ROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          API="23" 
+
+          for ARCH in arm arm64 386 amd64; do
             echo "::group::Building for android/$ARCH"
-            GOOS=android GOARCH=$ARCH CGO_ENABLED=0 \
-              go build -v -trimpath -mod=readonly -ldflags "$FLAGS" \
+            
+            # Setup variabili specifiche
+            export GOOS=android
+            export GOARCH=$ARCH
+            export CGO_ENABLED=1  # Necessario per arm, lo usiamo per tutti per coerenza
+            
+            # Seleziona il compilatore C (Clang) corretto dall'NDK
+            if [ "$ARCH" == "arm" ]; then
+              CC_BIN="$NDK_ROOT/armv7a-linux-androideabi${API}-clang"
+            elif [ "$ARCH" == "arm64" ]; then
+              CC_BIN="$NDK_ROOT/aarch64-linux-android${API}-clang"
+            elif [ "$ARCH" == "386" ]; then
+              CC_BIN="$NDK_ROOT/i686-linux-android${API}-clang"
+            elif [ "$ARCH" == "amd64" ]; then
+              CC_BIN="$NDK_ROOT/x86_64-linux-android${API}-clang"
+            fi
+            
+            # Imposta il compilatore per CGO
+            export CC="$CC_BIN"
+
+            echo "Using compiler: $CC"
+
+            # Compilazione
+            go build -v -trimpath -mod=readonly -ldflags "$FLAGS" \
               -o build/rclone-android-$ARCH . 2>&1 | tee "build-logs/build-android-$ARCH.log"
             
-            # Verifica che il file sia stato creato
             if [ -f "build/rclone-android-$ARCH" ]; then
               echo "✅ Successfully built rclone-android-$ARCH"
               ls -lh build/rclone-android-$ARCH
