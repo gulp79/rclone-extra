@@ -52,6 +52,11 @@ jobs:
             goos: linux
             goarch: arm64
             ext: ''
+          - name: linux-arm-v7
+            goos: linux
+            goarch: arm
+            goarm: 7
+            ext: ''
           - name: windows-amd64
             goos: windows
             goarch: amd64
@@ -114,7 +119,7 @@ jobs:
           # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v1.72.1-extra")
+          VERSION=$(echo "v1.72.1-extra")
 
           # Flag base: strip debug (-s -w) e versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
@@ -149,7 +154,7 @@ jobs:
           path: rclone${{ matrix.ext }}
           if-no-files-found: error
 
-  # --- JOB: ANDROID ---
+# --- JOB: ANDROID ---
   android:
     name: Build Android
     runs-on: ubuntu-latest
@@ -174,13 +179,14 @@ jobs:
       - name: Build Android Targets
         run: |
           set -euo pipefail
-          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v1.72.1-android-extra")
+          VERSION=$(echo "v1.72.1-android-extra")
           FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
           
           mkdir -p build build-logs
           
-          # Compila per tutte le architetture Android (Pure Go, senza CGO)
-          for ARCH in arm arm64 386 amd64; do
+          # NOTA: Rimosso 'arm' dalla lista perché richiede CGO/NDK obbligatorio.
+          # Compila per le architetture Android supportate in Pure Go.
+          for ARCH in arm64 386 amd64; do
             echo "::group::Building for android/$ARCH"
             GOOS=android GOARCH=$ARCH CGO_ENABLED=0 \
               go build -v -trimpath -mod=readonly -ldflags "$FLAGS" \
