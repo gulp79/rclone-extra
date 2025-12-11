@@ -1,9 +1,8 @@
-
 # Github Actions build for rclone (Custom & Clean)
 # Features:
 # - Windows: CGO enabled (cmount), Static Linking (no DLL deps), Custom Icon
 # - Linux:   CGO disabled (Pure Go), Static Linking, Multi-arch
-# - Android: All architectures
+# - Android: All architectures (Pure Go, no CGO)
 
 name: Build rclone-extra - Multi Platform
 
@@ -22,7 +21,7 @@ on:
           - android
   push:
     tags:
-      - 'v*'                # run su tag tipo v1.72.0
+      - 'v*'
 
 permissions:
   contents: read
@@ -57,10 +56,6 @@ jobs:
             goos: windows
             goarch: amd64
             ext: '.exe'
-
-    # Filtra le combinazioni della matrice in base alla scelta UI
-    # (Se target == linux, si eseguono solo le righe con goos=linux; se windows, solo quelle windows)
-    continue-on-error: false
 
     steps:
       - name: Skip non matching matrix rows
@@ -119,7 +114,7 @@ jobs:
           # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          VERSION="v1.72.0-extra"
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v1.72.1-extra")
 
           # Flag base: strip debug (-s -w) e versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
@@ -173,26 +168,32 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
+          check-latest: true
           cache: true
-
-      - name: Install Gomobile
-        run: |
-          go install golang.org/x/mobile/cmd/gobind@latest
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          export PATH=$PATH:$(go env GOPATH)/bin
-          gomobile init
 
       - name: Build Android Targets
         run: |
           set -euo pipefail
-          export PATH=$PATH:$(go env GOPATH)/bin
-          VERSION="v1.72.0-android-extra"
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v1.72.1-android-extra")
           FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
+          
           mkdir -p build build-logs
+          
+          # Compila per tutte le architetture Android (Pure Go, senza CGO)
           for ARCH in arm arm64 386 amd64; do
             echo "::group::Building for android/$ARCH"
-            GOOS=android GOARCH=$ARCH CGO_ENABLED=1 \
-              go build -v -tags android -trimpath -mod=readonly -ldflags "$FLAGS" -o build/rclone-android-$ARCH ./cmd/rclone 2>&1 | tee "build-logs/build-android-$ARCH.log"
+            GOOS=android GOARCH=$ARCH CGO_ENABLED=0 \
+              go build -v -trimpath -mod=readonly -ldflags "$FLAGS" \
+              -o build/rclone-android-$ARCH . 2>&1 | tee "build-logs/build-android-$ARCH.log"
+            
+            # Verifica che il file sia stato creato
+            if [ -f "build/rclone-android-$ARCH" ]; then
+              echo "✅ Successfully built rclone-android-$ARCH"
+              ls -lh build/rclone-android-$ARCH
+            else
+              echo "❌ Failed to build rclone-android-$ARCH"
+              exit 1
+            fi
             echo "::endgroup::"
           done
 
@@ -209,4 +210,3 @@ jobs:
         with:
           name: logs-android
           path: build-logs/build-android-*.log
-
