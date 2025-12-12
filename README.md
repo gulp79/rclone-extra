@@ -192,6 +192,77 @@ Please see the [rclone website](https://rclone.org/) for:
 
 - <https://rclone.org/downloads/>
 
+# **How to Add a Terabox Remote in rclone-extra**
+
+The Terabox backend requires authentication using your account’s **cookie** because Terabox does not provide an official API. Follow these steps:
+
+------
+
+#### **1. Install the Modified rclone**
+
+Download and install the custom build from rclone-extra releases or compile it from source:
+
+------
+
+#### **2. Get Your Terabox Authentication Cookie**
+
+You need the `Cookie` header from your logged-in session:
+
+1. Log in to Terabox using your browser.
+
+2. Open **Developer Tools** (F12) → **Network** tab.
+
+3. Refresh the page and select any request to `www.terabox.com`.
+
+4. Look for the **Request Headers** section and copy the entire `Cookie` value.
+
+   - Example:
+
+     ```
+     Cookie: BDUSS=xxxx; STOKEN=xxxx; ...
+     ```
+
+------
+
+#### **3. Configure the Remote**
+
+Run the rclone config command:
+
+```
+rclone config
+```
+
+Mostra più linee
+
+- Choose **`n`** for a new remote.
+- Enter a name (e.g., `terabox`).
+- Select the backend: `terabox`.
+- When prompted for authentication, paste the full cookie string.
+
+------
+
+#### **4. Test the Remote**
+
+Verify the configuration:
+
+```
+rclone ls terabox:
+```
+
+If everything is correct, you should see your files listed.
+
+------
+
+#### **Notes**
+
+- The cookie may expire after some time; repeat the process if you encounter authentication errors.
+
+- For better security, store the cookie in your rclone config file and restrict file permissions:
+
+  ```
+  chmod 600 ~/.config/rclone/rclone.conf
+  ```
+  
 ## License
 
 This is free software under the terms of the MIT license (check the
