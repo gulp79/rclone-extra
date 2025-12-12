@@ -2,6 +2,7 @@
 
 > ⚠️ **Unofficial Fork Disclaimer**  
 > This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alldebrid**, **iCloud Photos**, **Teldrive** and **Terabox** support.
+> Used also in https://github.com/gulp79/Round-Sync an Android GUI to Rclone.
 > I am **not affiliated with the upstream maintainers**, and this fork **does not intend to be malicious or harmful** in any way.  
 > Please **read the source code** if you're unsure or want to verify that it behaves as described.  
 > Contributions, feedback, and scrutiny are welcome.
