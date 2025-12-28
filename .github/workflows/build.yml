@@ -148,7 +148,7 @@ jobs:
 
       - name: Upload Artifact
         if: steps.gate.outputs.skip == 'false'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: rclone-${{ matrix.name }}
           path: rclone${{ matrix.ext }}
@@ -227,7 +227,7 @@ jobs:
           done
 
       - name: Upload Android Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: rclone-android-all
           path: build/rclone-android-*
@@ -235,7 +235,7 @@ jobs:
           
       - name: Upload Android build logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: logs-android
           path: build-logs/build-android-*.log
