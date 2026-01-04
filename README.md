@@ -1,13 +1,14 @@
 [![GitHub release](https://img.shields.io/github/v/release/gulp79/rclone-extra?include_prereleases)](https://github.com/gulp79/rclone-extra/releases/latest)  ![Total Downloads](https://img.shields.io/github/downloads/gulp79/rclone-extra/total)  ![Latest Downloads](https://img.shields.io/github/downloads/gulp79/rclone-extra/latest/total)
 
 > ⚠️ **Unofficial Fork Disclaimer**  
-> This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alldebrid**, **iCloud Photos**, **Teldrive** and **Terabox** support.
+> This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alist**, **iCloud Photos**, **Teldrive** and **Terabox** support.
 > Used also in https://github.com/gulp79/Round-Sync an Android GUI to Rclone.
 > I am **not affiliated with the upstream maintainers**, and this fork **does not intend to be malicious or harmful** in any way.  
 > Please **read the source code** if you're unsure or want to verify that it behaves as described.  
-> Contributions, feedback, and scrutiny are welcome.
->
-> Terabox code is taken from https://github.com/x1arch/rclone/tree/backend/terabox
+> Contributions, feedback, and scrutiny are welcome.  
+
+> Terabox code is taken from https://github.com/x1arch/rclone/tree/backend/terabox  
+> Others backend are from https://github.com/BenjiThatFoxGuy/bclone 
 
 <!-- markdownlint-disable-next-line first-line-heading no-inline-html -->
 [<img src="https://rclone.org/img/logo_on_light__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-light-mode-only)
