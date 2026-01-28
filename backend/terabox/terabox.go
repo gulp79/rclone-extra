@@ -18,7 +18,9 @@ import (
 	"io"
 	"net/http"
 	libPath "path"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,19 +31,8 @@ import (
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/fs/fshttp"
 	"github.com/rclone/rclone/fs/hash"
-	"github.com/rclone/rclone/fs/list"
 	"github.com/rclone/rclone/lib/encoder"
-	"github.com/rclone/rclone/lib/pacer"
 	"github.com/rclone/rclone/lib/rest"
-)
-
-const (
-	baseURL = "https://www.terabox.com"
-
-	minSleep       = 400 * time.Millisecond // api is extremely rate limited now
-	maxSleep       = 5 * time.Second
-	decayConstant  = 2 // bigger for slower decay, exponential
-	attackConstant = 0 // start with max sleep
 )
 
 // Check the interfaces are satisfied
@@ -54,9 +45,8 @@ var (
 	_ fs.Purger         = (*Fs)(nil)
 	_ fs.CleanUpper     = (*Fs)(nil)
 	_ fs.PutUncheckeder = (*Fs)(nil)
-	_ fs.ListPer        = (*Fs)(nil)
-	_ fs.Shutdowner     = (*Fs)(nil)
-	_ fs.Object         = (*Object)(nil)
+
+	_ fs.Object = (*Object)(nil)
 )
 
 func init() {
@@ -89,10 +79,16 @@ func init() {
 				Default:  5,
 			},
 			{
+				Help:     "Set custom Terabox domain (don't change it without the reason)",
+				Name:     "domain",
+				Advanced: true,
+				Default:  "https://www.terabox.com",
+			},
+			{
 				Help:     "Set custom header User Agent",
 				Name:     "user_agent",
 				Advanced: true,
-				Default:  "terabox;1.37.0.7;PC;PC-Windows;10.0.22631;WindowsTeraBox",
+				Default:  "terabox;1.42.2.150;PC;PC-Windows;10.0.22631;WindowsTeraBox",
 			},
 			{
 				Help:     "Set extra debug level from 0 to 4 (0 - none; 1 - name of function and params; 2 - response output + body; 3 - request output, 4 - request body)",
@@ -105,13 +101,9 @@ func init() {
 				Help:     config.ConfigEncodingHelp,
 				Advanced: true,
 				// maxFileLength = 255
-				Default: (encoder.Display |
-					encoder.EncodeBackQuote |
-					encoder.EncodeDoubleQuote |
-					encoder.EncodeLtGt |
-					encoder.EncodeLeftSpace |
-					encoder.EncodeInvalidUtf8),
-			}},
+				Default: encoder.EncodeSlash | encoder.EncodeLtGt | encoder.EncodeDoubleQuote | encoder.EncodeColon | encoder.EncodeQuestion | encoder.EncodeAsterisk | encoder.EncodePipe | encoder.EncodeBackSlash | encoder.EncodeCrLf | encoder.EncodeDel | encoder.EncodeCtl | encoder.EncodeLeftCrLfHtVt | encoder.EncodeRightCrLfHtVt | encoder.EncodeRightSpace | encoder.EncodeRightPeriod | encoder.EncodeInvalidUtf8 | encoder.EncodeDot,
+			},
+		},
 	})
 }
 
@@ -119,6 +111,7 @@ func init() {
 type Options struct {
 	// AccessToken  string               `config:"access_token"`
 	Cookie            string               `config:"cookie"`
+	Domain            string               `config:"domain"`
 	DeletePermanently bool                 `config:"delete_permanently"`
 	UploadThreads     uint8                `config:"upload_threads"`
 	UserAgent         string               `config:"user_agent"`
@@ -137,10 +130,7 @@ type Fs struct {
 	opt      *Options
 	features *fs.Features
 	client   *rest.Client
-	pacer    *fs.Pacer
-
-	origRoot     string
-	origRootItem *api.Item
+	// pacer    *fs.Pacer
 
 	baseURL     string
 	notFirstRun bool
@@ -177,33 +167,27 @@ func NewFs(ctx context.Context, name string, root string, config configmap.Mappe
 	}
 	opt.Cookie = valuedCookie(opt.Cookie)
 
+	if matched, _ := regexp.MatchString(`https?://`, opt.Domain); !matched {
+		opt.Domain = "https://" + opt.Domain
+	}
+
 	debug(opt, 1, "NewFS %s; %s; %+v;", name, root, opt)
 
-	if len(root) > 0 {
-		if root[0:1] == "." {
-			root = root[1:]
-		}
-
-		if root[0:1] != "/" {
-			root = "/" + root
-		}
-
-	} else if root == "" {
-		root = "/"
+	root = strings.Trim(strings.TrimPrefix(root, "./"), "/")
+	if root == "." {
+		root = ""
 	}
 
 	f := &Fs{
-		name:     name,
-		root:     root,
-		origRoot: root, // save origin root, because it can change, if path is file
-		opt:      opt,
-		pacer:    fs.NewPacer(ctx, pacer.NewDefault(pacer.MinSleep(minSleep), pacer.MaxSleep(maxSleep), pacer.DecayConstant(decayConstant), pacer.AttackConstant(attackConstant))),
-		baseURL:  baseURL,
-		// jsToken: "",
+		name: name,
+		root: root,
+		opt:  opt,
+
+		baseURL: opt.Domain,
 	}
 
 	f.features = (&fs.Features{
-		ReadMetadata:            true,
+		// ReadMetadata:            true,
 		CanHaveEmptyDirectories: true,
 	}).Fill(ctx, f)
 
@@ -211,25 +195,22 @@ func NewFs(ctx context.Context, name string, root string, config configmap.Mappe
 	if opt.UserAgent != "" {
 		clientConfig.UserAgent = opt.UserAgent
 	}
-	clientConfig.Timeout = 5 * fs.Duration(time.Second)
-
+	// clientConfig.Timeout = 5 * fs.Duration(time.Second)
 	f.client = rest.NewClient(fshttp.NewClient(newCtx))
 
 	// update base url for official API Requests [not finished, some methods should be update for compatible]
-	if f.accessToken != "" {
-		f.baseURL += "/open"
-	}
+	// if f.accessToken != "" {
+	// 	f.baseURL += "/open"
+	// }
 
 	// the root exists ever, have no reason to check it
-	if root != "/" {
-		var err error
-
-		// cache the item, for do not request the same data, when will make NewObject on next step, if item is nil, then file or dir not found and we can skip request a List or NewObject
-		if f.origRootItem, err = f.apiItemInfo(ctx, root, true); err != nil {
+	if root != "" {
+		item, err := f.apiItemInfo(ctx, f.opt.Enc.FromStandardPath(root), true)
+		if err != nil {
 			if !api.ErrIsNum(err, -9) {
 				return nil, err
 			}
-		} else if f.origRootItem.Isdir == 0 {
+		} else if item.Isdir == 0 {
 			f.root = libPath.Dir(root)
 
 			// return an error with an fs which points to the parent of file
@@ -310,74 +291,37 @@ func (f *Fs) About(ctx context.Context) (*fs.Usage, error) {
 // This should return ErrDirNotFound if the directory isn't
 // found.
 func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err error) {
-	return list.WithListP(ctx, dir, f)
-}
+	debug(f.opt, 1, "List %s;", dir)
 
-// ListP lists the objects and directories of the Fs starting
-// from dir non recursively into out.
-//
-// dir should be "" to start from the root, and should not
-// have trailing slashes.
-//
-// This should return ErrDirNotFound if the directory isn't
-// found.
-//
-// It should call callback for each tranche of entries read.
-// These need not be returned in any particular order.  If
-// callback returns an error then the listing will stop
-// immediately.
-func (f *Fs) ListP(ctx context.Context, dir string, callback fs.ListRCallback) error {
-	debug(f.opt, 1, "ListP %s;", dir)
+	list, err := f.apiList(ctx, f.opt.Enc.FromStandardPath(libPath.Join(f.root, dir)))
+	if err != nil {
+		if api.ErrIsNum(err, -9) {
+			return nil, fs.ErrorDirNotFound
+		}
 
-	if f.root != "/" && f.origRootItem == nil {
-		return fs.ErrorDirNotFound
+		return nil, err
 	}
 
-	listHelper := list.NewHelper(callback)
-	targetDir := libPath.Join(f.root, dir)
-	page := 1
-	limit := 100 // Matches default in apiList
-
-	for {
-		list, err := f.apiList(ctx, targetDir, page, limit)
-		if err != nil {
-			if api.ErrIsNum(err, -9) {
-				return fs.ErrorDirNotFound
+	for _, item := range list {
+		remote := libPath.Join(dir, f.opt.Enc.ToStandardName(item.Name))
+		if item.Isdir > 0 {
+			dir := fs.NewDir(remote, time.Time{}).SetID(strconv.FormatUint(item.ID, 10))
+			entries = append(entries, dir)
+		} else {
+			file := &Object{
+				fs:      f,
+				id:      item.ID,
+				remote:  remote,
+				size:    item.Size,
+				modTime: time.Unix(item.ServerModifiedTime, 0),
+				hash:    item.MD5,
 			}
-			return err
-		}
 
-		for _, item := range list {
-			remote := libPath.Join(dir, f.opt.Enc.ToStandardName(item.Name))
-			if item.Isdir > 0 {
-				d := fs.NewDir(remote, time.Time{}).SetID(strconv.FormatUint(item.ID, 10))
-				d.SetSize(item.Size) // Directories in Terabox usually 0, but safe to set
-				if err := listHelper.Add(d); err != nil {
-					return err
-				}
-			} else {
-				file := &Object{
-					fs:      f,
-					id:      item.ID,
-					remote:  remote,
-					size:    item.Size,
-					modTime: time.Unix(item.ServerModifiedTime, 0),
-					hash:    item.MD5,
-				}
-				if err := listHelper.Add(file); err != nil {
-					return err
-				}
-			}
+			entries = append(entries, file)
 		}
-
-		// Check if we have reached the end of the list
-		if len(list) < limit {
-			break
-		}
-		page++
 	}
 
-	return listHelper.Flush()
+	return entries, nil
 }
 
 // NewObject finds the Object at remote.  If it can't be found it
@@ -385,22 +329,13 @@ func (f *Fs) ListP(ctx context.Context, dir string, callback fs.ListRCallback) e
 func (f *Fs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
 	debug(f.opt, 1, "NewObject %s;", remote)
 
-	var item *api.Item
-	if f.origRoot == libPath.Join(f.root, remote) {
-		if f.origRootItem == nil {
+	item, err := f.apiItemInfo(ctx, f.opt.Enc.FromStandardPath(libPath.Join(f.root, remote)), true)
+	if err != nil {
+		if api.ErrIsNum(err, -9) {
 			return nil, fs.ErrorObjectNotFound
 		}
-		item = f.origRootItem
-	} else {
-		var err error
-		item, err = f.apiItemInfo(ctx, libPath.Join(f.root, remote), true)
-		if err != nil {
-			if api.ErrIsNum(err, -9) {
-				return nil, fs.ErrorObjectNotFound
-			}
 
-			return nil, err
-		}
+		return nil, err
 	}
 
 	if item.Isdir > 0 {
@@ -431,14 +366,22 @@ func (f *Fs) Put(ctx context.Context, in io.Reader, src fs.ObjectInfo, options .
 	debug(f.opt, 1, "Put %p; %+v; %+v;", in, src, options)
 
 	if src.Size() < 0 {
-		return nil, errors.New("refusing to update with unknown size")
+		return nil, errors.New("refusing to upload with unknown size")
 	}
 
-	if err := f.apiFileUpload(ctx, libPath.Join(f.root, src.Remote()), src.Size(), src.ModTime(ctx), in, options, 0); err != nil {
+	if src.Size() == 0 {
+		return nil, fs.ErrorCantUploadEmptyFiles
+	}
+
+	exObj, err := f.NewObject(ctx, src.Remote())
+	switch err {
+	case nil:
+		return exObj, exObj.Update(ctx, in, src, options...)
+	case fs.ErrorObjectNotFound:
+		return f.PutUnchecked(ctx, in, src, options...)
+	default:
 		return nil, err
 	}
-
-	return f.NewObject(ctx, src.Remote())
 }
 
 // Mkdir makes the directory (container, bucket)
@@ -452,7 +395,7 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) (err error) {
 		return nil
 	}
 
-	if err := f.apiMkDir(ctx, pth); err != nil && !api.ErrIsNum(err, -8) {
+	if err := f.apiMkDir(ctx, f.opt.Enc.FromStandardPath(pth)); err != nil && !api.ErrIsNum(err, -8) {
 		return err
 	}
 
@@ -465,14 +408,20 @@ func (f *Fs) Mkdir(ctx context.Context, dir string) (err error) {
 func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	debug(f.opt, 1, "Rmdir %s;", dir)
 
-	if items, err := f.List(ctx, dir); err != nil {
+	pth := f.opt.Enc.FromStandardPath(libPath.Join(f.root, dir))
+	if pth == "" {
+		return errors.New("can't purge root directory")
+	}
+
+	items, err := f.List(ctx, dir)
+	if err != nil {
 		return err
 	} else if len(items) != 0 {
 		return fs.ErrorDirectoryNotEmpty
 	}
 
 	return f.apiOperation(ctx, "delete", []api.OperationalItem{
-		{Path: libPath.Join(f.root, dir)},
+		{Path: pth},
 	})
 }
 
@@ -492,10 +441,14 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 	debug(f.opt, 1, "PutUnchecked %p; %+v; %+v;", in, src, options)
 
 	if src.Size() < 0 {
-		return nil, errors.New("refusing to update with unknown size")
+		return nil, errors.New("refusing to upload with unknown size")
 	}
 
-	if err := f.apiFileUpload(ctx, libPath.Join(f.root, src.Remote()), src.Size(), src.ModTime(ctx), in, options, 1); err != nil {
+	if src.Size() == 0 {
+		return nil, fs.ErrorCantUploadEmptyFiles
+	}
+
+	if err := f.apiFileUpload(ctx, f.opt.Enc.FromStandardPath(libPath.Join(f.root, src.Remote())), src.Size(), src.ModTime(ctx), in, options, 0); err != nil {
 		return nil, err
 	}
 
@@ -522,13 +475,18 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 
 	srcPath := libPath.Join(srcObj.fs.root, srcObj.remote)
-	if f.origRootItem == nil && f.root != "/" {
-		if err := f.apiMkDir(ctx, f.root); err != nil && !api.ErrIsNum(err, -8) {
+	dstPath := libPath.Join(f.root, remote)
+	dstFile := ""
+	dstPath, dstFile = libPath.Split(dstPath)
+	dstPath = strings.Trim(dstPath, "/")
+
+	if f.root != dstPath {
+		if err := f.apiMkDir(ctx, f.opt.Enc.FromStandardPath(dstPath)); err != nil && !api.ErrIsNum(err, -8) {
 			return nil, err
 		}
 	}
 
-	if err := f.apiOperation(ctx, "copy", []api.OperationalItem{{Path: srcPath, Destination: f.root, NewName: remote}}); err != nil {
+	if err := f.apiOperation(ctx, "copy", []api.OperationalItem{{Path: f.opt.Enc.FromStandardPath(srcPath), Destination: f.opt.Enc.FromStandardPath(dstPath), NewName: f.opt.Enc.FromStandardName(dstFile)}}); err != nil {
 		return nil, fmt.Errorf("couldn't copy file: %w", err)
 	}
 
@@ -556,13 +514,18 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 
 	srcPath := libPath.Join(srcObj.fs.root, srcObj.remote)
-	if f.origRootItem == nil && f.root != "/" {
-		if err := f.apiMkDir(ctx, f.root); err != nil && !api.ErrIsNum(err, -8) {
+	dstPath := libPath.Join(f.root, remote)
+	dstFile := ""
+	dstPath, dstFile = libPath.Split(dstPath)
+	dstPath = strings.Trim(dstPath, "/")
+
+	if f.root != dstPath {
+		if err := f.apiMkDir(ctx, f.opt.Enc.FromStandardPath(dstPath)); err != nil && !api.ErrIsNum(err, -8) {
 			return nil, err
 		}
 	}
 
-	if err := f.apiOperation(ctx, "move", []api.OperationalItem{{Path: srcPath, Destination: f.root, NewName: remote}}); err != nil {
+	if err := f.apiOperation(ctx, "move", []api.OperationalItem{{Path: f.opt.Enc.FromStandardPath(srcPath), Destination: f.opt.Enc.FromStandardPath(dstPath), NewName: f.opt.Enc.FromStandardName(dstFile)}}); err != nil {
 		return nil, fmt.Errorf("couldn't move file: %w", err)
 	}
 
@@ -591,22 +554,15 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	}
 
 	srcPath := libPath.Join(srcFs.root, srcRemote)
-	if srcFs.root != "/" && srcFs.origRootItem == nil {
-		return fmt.Errorf("source directory not found")
-	}
-
 	dstPath, name := libPath.Split(libPath.Join(f.root, dstRemote))
 	if name == "" {
 		return fmt.Errorf("couldn't move root directory")
 	}
 
-	if f.root != "/" && f.origRootItem == nil {
-		if err := f.apiMkDir(ctx, f.root); err != nil && !api.ErrIsNum(err, -8) {
-			return err
+	if err := f.apiOperation(ctx, "move", []api.OperationalItem{{Path: f.opt.Enc.FromStandardPath(srcPath), Destination: f.opt.Enc.FromStandardPath(dstPath), NewName: f.opt.Enc.FromStandardName(name)}}); err != nil {
+		if api.ErrIsNum(err, -8) {
+			return fs.ErrorDirExists
 		}
-	}
-
-	if err := f.apiOperation(ctx, "move", []api.OperationalItem{{Path: srcPath, Destination: dstPath, NewName: name}}); err != nil {
 		return fmt.Errorf("couldn't move directory: %w", err)
 	}
 
@@ -625,8 +581,16 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 func (f *Fs) Purge(ctx context.Context, dir string) error {
 	debug(f.opt, 1, "Purge %s;", dir)
 
+	_, err := f.apiItemInfo(ctx, f.opt.Enc.FromStandardPath(libPath.Join(f.root, dir)), true)
+	if err != nil {
+		if api.ErrIsNum(err, -9) {
+			return fs.ErrorDirNotFound
+		}
+		return err
+	}
+
 	return f.apiOperation(ctx, "delete", []api.OperationalItem{
-		{Path: libPath.Join(f.root, dir)},
+		{Path: f.opt.Enc.FromStandardPath(libPath.Join(f.root, dir))},
 	})
 }
 
@@ -642,13 +606,6 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 	debug(f.opt, 1, "CleanUp")
 
 	return f.apiCleanRecycleBin(ctx)
-}
-
-// Shutdown the backend, closing any background tasks and any
-// cached connections.
-func (f *Fs) Shutdown(ctx context.Context) error {
-	debug(f.opt, 1, "Shutdown")
-	return nil
 }
 
 //
@@ -708,6 +665,13 @@ func (o *Object) Storable() bool {
 	return true
 }
 
+// Metadata returns metadata for an DirEntry
+//
+// It should return nil if there is no Metadata
+// func (o *Object) Metadata(ctx context.Context) (fs.Metadata, error) {
+// 	return nil, nil
+// }
+
 //
 // fs.IDer Interface implementation [optional]
 //------------------------------------------------------------------------------------------------------------------------
@@ -731,7 +695,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	debug(o.fs.opt, 1, "Object Open %+v;", options)
 
 	if o.downloadLink == "" {
-		if item, err := o.fs.apiItemInfo(ctx, libPath.Join(o.fs.root, o.remote), true); err == nil && item.DownloadLink != "" {
+		if item, err := o.fs.apiItemInfo(ctx, o.fs.opt.Enc.FromStandardPath(libPath.Join(o.fs.root, o.remote)), true); err == nil && item.DownloadLink != "" {
 			o.downloadLink = item.DownloadLink
 		}
 	}
@@ -769,7 +733,11 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		return errors.New("refusing to update with unknown size")
 	}
 
-	if err := o.fs.apiFileUpload(ctx, libPath.Join(o.fs.root, o.remote), src.Size(), src.ModTime(ctx), in, options, 3); err != nil {
+	if src.Size() == 0 {
+		return errors.New("refusing to update with 0 size")
+	}
+
+	if err := o.fs.apiFileUpload(ctx, o.fs.opt.Enc.FromStandardPath(libPath.Join(o.fs.root, o.remote)), src.Size(), src.ModTime(ctx), in, options, 3); err != nil {
 		return err
 	}
 
@@ -790,6 +758,6 @@ func (o *Object) Remove(ctx context.Context) error {
 	debug(o.fs.opt, 1, "Remove")
 
 	return o.fs.apiOperation(ctx, "delete", []api.OperationalItem{
-		{Path: libPath.Join(o.fs.root, o.remote)},
+		{Path: o.fs.opt.Enc.FromStandardPath(libPath.Join(o.fs.root, o.remote))},
 	})
 }
