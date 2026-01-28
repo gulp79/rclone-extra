@@ -66,7 +66,7 @@ retry:
 		f.client.SetRoot(f.baseURL)
 		f.client.SetHeader("Accept", "application/json, text/plain, */*")
 		if f.accessToken == "" {
-			f.client.SetHeader("Referer", baseURL)
+			f.client.SetHeader("Referer", f.opt.Domain)
 			f.client.SetHeader("X-Requested-With", "XMLHttpRequest")
 			f.client.SetHeader("Cookie", f.opt.Cookie)
 		}
@@ -104,14 +104,7 @@ retry:
 		opts.Body = io.TeeReader(opts.Body, reqBody)
 	}
 
-	var resp *http.Response
-	var err error
-
-	// Use Pacer for rate limiting and standard retries
-	err = f.pacer.Call(func() (bool, error) {
-		resp, err = f.client.Call(ctx, opts)
-		return shouldRetry(ctx, resp, err)
-	})
+	resp, err := f.client.Call(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -126,22 +119,15 @@ retry:
 	body, _ := io.ReadAll(resp.Body)
 	debug(f.opt, 2, "Response body: %s", body)
 
-	// Additional logic for custom retries (e.g. JS Token refresh, domain change)
-	// Note: Pacer handles standard 429/5xx retries above.
-	// This block handles logic-specific retries that require modifying the Fs state.
-
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		err = fmt.Errorf("http error %d: %v", resp.StatusCode, resp.Status)
 		debug(f.opt, 1, "Error: %s", err)
-		// retryErrorCodes handled by pacer mostly, but if specific logic needed:
 		if IsInSlice(resp.StatusCode, retryErrorCodes) {
 			retry++
 			if retry > 2 {
 				return err
 			}
-			// Pacer already slept, but if we are here it means pacer gave up or we want to force retry loop for logic
-			// However, pacer.Call returns final error.
-			// We keep this check for backward compat or specific handling not covered by standard pacer
+
 			time.Sleep(time.Duration(retry) * time.Second)
 			goto retry
 		}
@@ -164,7 +150,17 @@ retry:
 				retry++
 				goto retry
 			} else if prefix, ok := resp.Header["Url-Domain-Prefix"]; ok && len(prefix) > 0 && api.ErrIsNum(err, -6) { // for some accounts base url can be different, then for others, update it
-				newBaseURL := "https://" + prefix[0] + ".terabox.com"
+				purl, err := url.Parse(f.baseURL)
+				if err != nil {
+					return err
+				}
+
+				hostParts := strings.Split(purl.Host, ".")
+				if len(hostParts) < 2 {
+					return fmt.Errorf("invalid base url: %s", purl.Host)
+				}
+
+				newBaseURL := "https://" + prefix[0] + "." + hostParts[len(hostParts)-2] + "." + hostParts[len(hostParts)-1]
 				f.client.SetRoot(newBaseURL)
 				debug(f.opt, 1, "Base URL changed from %s to %s", f.baseURL, newBaseURL)
 
@@ -177,24 +173,6 @@ retry:
 	}
 
 	return nil
-}
-
-// shouldRetry returns a boolean as to whether this resp and err
-// deserve to be retried.
-func shouldRetry(ctx context.Context, resp *http.Response, err error) (bool, error) {
-	if err != nil {
-		// Check for context cancelled error
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return false, err
-		}
-		return true, err
-	}
-
-	if resp.StatusCode == 429 || (resp.StatusCode >= 500 && resp.StatusCode < 600) {
-		return true, fmt.Errorf("http error %d", resp.StatusCode)
-	}
-
-	return false, nil
 }
 
 func (f *Fs) apiJsToken(ctx context.Context) error {
@@ -226,6 +204,10 @@ func (f *Fs) apiCheckLogin(ctx context.Context) error {
 		return err
 	}
 
+	if res.Err() != nil {
+		return res.Err()
+	}
+
 	return nil
 }
 
@@ -245,31 +227,48 @@ func (f *Fs) apiCheckPremium(ctx context.Context) error {
 	return nil
 }
 
-// apiList fetches a single page of files from the directory
-func (f *Fs) apiList(ctx context.Context, dir string, page, limit int) ([]*api.Item, error) {
-	if len(dir) == 0 || dir[0] != '/' {
-		dir = "/" + dir
-	}
-
+func (f *Fs) apiList(ctx context.Context, path string) ([]*api.Item, error) {
+	page := 1
+	limit := 100
 	opt := NewRequest(http.MethodGet, "/api/list")
-	opt.Parameters.Set("dir", dir)
+	opt.Parameters.Set("dir", TBPath(path))
 	// opt.Parameters.Set("web", "1") // If 1 is passed, the thumbnail field thumbs will be returned.
-	opt.Parameters.Set("page", strconv.Itoa(page))
-	opt.Parameters.Set("num", strconv.Itoa(limit))
+	// opt.Parameters.Set("order", ...) // Sorting field: time (modification time), name (file name), size (size; note that directories do not have a size)
+	// if true {
+	// 	opt.Parameters.Set("desc", "1") // 1: descending order; 0: ascending order
+	// }
 
-	var res api.ResponseList
-	err := f.apiExec(ctx, opt, &res)
-	if err != nil {
-		return nil, err
+	list := make([]*api.Item, 0)
+	for {
+		opt.Parameters.Set("page", strconv.Itoa(page))
+		opt.Parameters.Set("num", strconv.Itoa(limit))
+
+		var res api.ResponseList
+		err := f.apiExec(ctx, opt, &res)
+		if err != nil {
+			return nil, err
+		}
+
+		if res.Err() != nil {
+			return list, res.Err()
+		}
+
+		list = append(list, res.List...)
+
+		if len(res.List) == 0 || len(res.List) < limit {
+			break
+		}
+
+		page++
 	}
 
-	return res.List, nil
+	return list, nil
 }
 
 // files info, can return info about a few files, but we're use it for only one file
 func (f *Fs) apiItemInfo(ctx context.Context, path string, downloadLink bool) (*api.Item, error) {
 	opt := NewRequest(http.MethodGet, "/api/filemetas")
-	opt.Parameters.Set("target", fmt.Sprintf(`["%s"]`, path))
+	opt.Parameters.Set("target", fmt.Sprintf(`["%s"]`, TBPath(path)))
 	if downloadLink {
 		opt.Parameters.Set("dlink", "1")
 	} else {
@@ -291,23 +290,34 @@ func (f *Fs) apiItemInfo(ctx context.Context, path string, downloadLink bool) (*
 		return nil, err
 	}
 
+	if res.Err() != nil {
+		return nil, res.Err()
+	}
+
 	return nil, fs.ErrorObjectNotFound
 }
 
 func (f *Fs) apiMkDir(ctx context.Context, path string) error {
 	opt := NewRequest(http.MethodPost, "/api/create")
 	opt.MultipartParams = url.Values{}
-	opt.MultipartParams.Set("path", path)
+	opt.MultipartParams.Set("path", TBPath(path))
 	opt.MultipartParams.Set("isdir", "1")
 	opt.MultipartParams.Set("rtype", "0") // The file naming policy. The default value is 1. 0: Do not rename. If a file with the same name exists in the cloud, this call will fail and return a conflict; 1: Rename if there is any path conflict; 2: Rename only if there is a path conflict and the block_list is different; 3: Overwrite
 
 	var res api.ResponseDefault
 	err := f.apiExec(ctx, opt, &res)
-	return err
+	if err != nil {
+		return err
+	}
+	if res.Err() != nil {
+		return res.Err()
+	}
+
+	return nil
 }
 
 // operation - copy (file copy), move (file movement), rename (file renaming), and delete (file deletion)
-// opera=copy: filelist: [{"path":"/hello/test.mp4","dest":"","newname":"test.mp4"}]
+// opera=copy: filelist: [{"path":"/hello/test.mp4","dest":"/hello2","newname":"test.mp4-1"}]
 // opera=move: filelist: [{"path":"/test.mp4","dest":"/test_dir","newname":"test.mp4"}]
 // opera=rename: filelist：[{"path":"/hello/test.mp4","newname":"test_one.mp4"}]
 // opera=delete: filelist: ["/test.mp4"]
@@ -322,6 +332,11 @@ func (f *Fs) apiOperation(ctx context.Context, operation string, items []api.Ope
 		if err := f.apiJsToken(ctx); err != nil {
 			return err
 		}
+	}
+
+	for idx, item := range items {
+		items[idx].Path = TBPath(item.Path)
+		items[idx].Destination = TBPath(item.Destination)
 	}
 
 	var list any
@@ -353,6 +368,10 @@ func (f *Fs) apiOperation(ctx context.Context, operation string, items []api.Ope
 		}
 	}
 
+	if res.Err() != nil {
+		return res.Err()
+	}
+
 	if operation == "delete" && f.opt.DeletePermanently {
 		if err := f.apiCleanRecycleBin(ctx); err != nil {
 			return err
@@ -381,6 +400,9 @@ func (f *Fs) apiDownloadLink(ctx context.Context, fileID uint64) (*api.ResponseD
 	if err := f.apiExec(ctx, opt, &res); err != nil {
 		return nil, err
 	}
+	if res.Err() != nil {
+		return nil, res.Err()
+	}
 
 	return &res, nil
 }
@@ -391,6 +413,9 @@ func (f *Fs) apiSignPrepare(ctx context.Context) ([]string, error) {
 	var res api.ResponseHomeInfo
 	if err := f.apiExec(ctx, opt, &res); err != nil {
 		return nil, err
+	}
+	if res.Err() != nil {
+		return nil, res.Err()
 	}
 
 	return []string{res.Data.Sign3, res.Data.Sign1}, nil
@@ -404,6 +429,9 @@ func (f *Fs) apiCleanRecycleBin(ctx context.Context) error {
 	var res api.ResponseDefault
 	if err := f.apiExec(ctx, opt, &res); err != nil {
 		return err
+	}
+	if res.Err() != nil {
+		return res.Err()
 	}
 
 	return nil
@@ -419,12 +447,17 @@ func (f *Fs) apiQuotaInfo(ctx context.Context) (*api.ResponseQuota, error) {
 	if err := f.apiExec(ctx, opt, &res); err != nil {
 		return nil, err
 	}
+	if res.Err() != nil {
+		return nil, res.Err()
+	}
 
 	return &res, nil
 }
 
 // Upload file
 func (f *Fs) apiFileUpload(ctx context.Context, path string, size int64, modTime time.Time, in io.Reader, options []fs.OpenOption, overwriteMode uint8) error {
+	path = TBPath(path)
+
 	f.isPremiumMX.Do(func() {
 		_ = f.apiCheckPremium(ctx)
 	})
@@ -452,7 +485,7 @@ func (f *Fs) apiFileUpload(ctx context.Context, path string, size int64, modTime
 	}
 
 	// precreate file
-	resPreCreate, err := f.apiFilePrecreate(ctx, path, size, modTime)
+	resPreCreate, err := f._apiFileUploadPrecreate(ctx, path, size, modTime)
 	if err != nil {
 		return err
 	}
@@ -523,7 +556,7 @@ func (f *Fs) apiFileUpload(ctx context.Context, path string, size int64, modTime
 				}
 
 				// upload chunk
-				resUpload, err := f.apiFileUploadChunk(ctx, path, resPreCreate.UploadID, chunk.Number, int64(chunk.Readed), chunk.Data, options)
+				resUpload, err := f._apiFileUploadChunk(ctx, path, resPreCreate.UploadID, chunk.Number, int64(chunk.Readed), chunk.Data, options)
 				if err != nil {
 					attemptChunkUpload++
 					debug(f.opt, 1, "upload chunk (%d) error: %s | attempt: %d", chunk.Number, err, attemptChunkUpload)
@@ -576,7 +609,7 @@ retryFileCreate:
 	}
 
 	// create file
-	created, err := f.apiFileCreate(ctx, path, resPreCreate.UploadID, size, modTime, chunksUploadedList, overwriteMode)
+	created, err := f._apiFileUploadCreate(ctx, path, resPreCreate.UploadID, size, modTime, chunksUploadedList, overwriteMode)
 	if err != nil {
 		if _, ok := err.(api.ErrorInterface); !ok && attemptFileCreate < 3 {
 			attemptFileCreate++
@@ -619,13 +652,16 @@ func (f *Fs) apiFileLocateUpload(ctx context.Context) error {
 	if err := f.apiExec(ctx, opt, &res); err != nil {
 		return err
 	}
+	if res.Err() != nil {
+		return res.Err()
+	}
 
 	f.uploadHost = res.Host
 
 	return nil
 }
 
-func (f *Fs) apiFilePrecreate(ctx context.Context, path string, size int64, modTime time.Time) (*api.ResponsePrecreate, error) {
+func (f *Fs) _apiFileUploadPrecreate(ctx context.Context, path string, size int64, modTime time.Time) (*api.ResponsePrecreate, error) {
 	opt := NewRequest(http.MethodPost, "/api/precreate")
 
 	opt.MultipartParams = url.Values{}
@@ -650,14 +686,17 @@ func (f *Fs) apiFilePrecreate(ctx context.Context, path string, size int64, modT
 	if err != nil {
 		return nil, err
 	}
+	if res.Err() != nil {
+		return nil, res.Err()
+	}
 
 	return &res, nil
 }
 
-func (f *Fs) apiFileUploadChunk(ctx context.Context, path, uploadID string, chunkNumber int, size int64, data []byte, options []fs.OpenOption) (*api.ResponseUploadedChunk, error) {
+func (f *Fs) _apiFileUploadChunk(ctx context.Context, path, uploadID string, chunkNumber int, size int64, data []byte, options []fs.OpenOption) (*api.ResponseUploadedChunk, error) {
 	opt := NewRequest(http.MethodPost, fmt.Sprintf("https://%s/rest/2.0/pcs/superfile2", f.uploadHost))
 	opt.Parameters.Set("method", "upload")
-	opt.Parameters.Set("path", path)
+	opt.Parameters.Set("path", TBPath(path))
 	opt.Parameters.Set("uploadid", uploadID)
 	opt.Parameters.Set("partseq", fmt.Sprintf("%d", chunkNumber))
 	opt.Parameters.Set("uploadsign", "0")
@@ -680,7 +719,7 @@ func (f *Fs) apiFileUploadChunk(ctx context.Context, path, uploadID string, chun
 	return &res, nil
 }
 
-func (f *Fs) apiFileCreate(ctx context.Context, path, uploadID string, size int64, modTime time.Time, blockList []string, overwriteMode uint8) (*api.ResponseCreate, error) {
+func (f *Fs) _apiFileUploadCreate(ctx context.Context, path, uploadID string, size int64, modTime time.Time, blockList []string, overwriteMode uint8) (*api.ResponseCreate, error) {
 	opt := NewRequest(http.MethodPost, "/api/create")
 	opt.Parameters.Set("isdir", "0")
 
@@ -712,6 +751,9 @@ func (f *Fs) apiFileCreate(ctx context.Context, path, uploadID string, size int6
 	var res api.ResponseCreate
 	if err := f.apiExec(ctx, opt, &res); err != nil {
 		return nil, err
+	}
+	if res.Err() != nil {
+		return nil, res.Err()
 	}
 
 	return &res, nil
