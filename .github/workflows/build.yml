@@ -119,7 +119,7 @@ jobs:
           # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          VERSION=$(echo "v1.72.1-extra")
+          VERSION=$(echo "v1.73.0-DEV-extra")
 
           # Flag base: strip debug (-s -w) e versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
