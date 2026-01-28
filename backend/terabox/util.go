@@ -132,3 +132,14 @@ func getChunkSize(fileSize int64, isVIP bool) int64 {
 
 	return limitSizes[len(limitSizes)-1] * MiB
 }
+
+// TBPath update the path with leading slash "/"
+func TBPath(path string) string {
+	if len(path) > 0 && path[0:1] != "/" {
+		return "/" + path
+	} else if len(path) == 0 {
+		return "/"
+	}
+
+	return path
+}
