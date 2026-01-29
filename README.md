@@ -24,11 +24,6 @@
 [Forum](https://forum.rclone.org/) |
 [bclone](https://github.com/BenjiThatFoxGuy/bclone)
 
-[![Build Status](https://github.com/rclone/rclone/workflows/build/badge.svg)](https://github.com/rclone/rclone/actions?query=workflow%3Abuild)
-[![Go Report Card](https://goreportcard.com/badge/github.com/rclone/rclone)](https://goreportcard.com/report/github.com/rclone/rclone)
-[![GoDoc](https://godoc.org/github.com/rclone/rclone?status.svg)](https://godoc.org/github.com/rclone/rclone)
-[![Docker Pulls](https://img.shields.io/docker/pulls/rclone/rclone)](https://hub.docker.com/r/rclone/rclone)
-
 # Rclone
 
 Rclone *("rsync for cloud storage")* is a command-line program to sync files and
