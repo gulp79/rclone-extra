@@ -84,7 +84,7 @@ jobs:
 
       - name: Install Go
         if: steps.gate.outputs.skip == 'false'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           check-latest: true
@@ -169,7 +169,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           check-latest: true
