@@ -89,7 +89,8 @@ retry:
 	if retry == 0 && opts.Method == http.MethodPost && opts.MultipartParams != nil {
 		var overhead int64
 		var err error
-		opts.Body, opts.ContentType, overhead, err = rest.MultipartUpload(ctx, opts.Body, opts.MultipartParams, opts.MultipartContentName, opts.MultipartFileName, "")
+		fileCT := "application/octet-stream"
+		opts.Body, opts.ContentType, overhead, err = rest.MultipartUpload(ctx, opts.Body, opts.MultipartParams, opts.MultipartContentName, opts.MultipartFileName, fileCT)
 		if err != nil {
 			return err
 		}
@@ -702,7 +703,7 @@ func (f *Fs) _apiFileUploadChunk(ctx context.Context, path, uploadID string, chu
 	opt.Parameters.Set("uploadsign", "0")
 	opt.Options = options
 
-	formReader, contentType, overhead, err := rest.MultipartUpload(ctx, bytes.NewReader(data), opt.MultipartParams, "file", "blob", "")
+	formReader, contentType, overhead, err := rest.MultipartUpload(ctx, bytes.NewReader(data), opt.MultipartParams, "file", "blob", "application/octet-stream")
 	if err != nil {
 		return nil, fmt.Errorf("failed to make multipart upload for file: %w", err)
 	}
