@@ -78,13 +78,13 @@ jobs:
 
       - name: Checkout
         if: steps.gate.outputs.skip == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Install Go
         if: steps.gate.outputs.skip == 'false'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           check-latest: true
@@ -119,7 +119,7 @@ jobs:
           # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          VERSION=$(echo "v1.73.0-DEV-extra")
+          VERSION=$(echo "v1.73.0-extra")
 
           # Flag base: strip debug (-s -w) e versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
@@ -164,12 +164,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           check-latest: true
