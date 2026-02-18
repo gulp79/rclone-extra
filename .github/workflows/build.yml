@@ -86,7 +86,7 @@ jobs:
         if: steps.gate.outputs.skip == 'false'
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.x'
           check-latest: true
           cache: true
 
@@ -100,9 +100,9 @@ jobs:
       - name: Setup WinFsp Headers (Windows Only)
         if: steps.gate.outputs.skip == 'false' && matrix.goos == 'windows'
         run: |
-          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.0.zip
+          wget -q -O winfsp.zip https://github.com/winfsp/winfsp/archive/refs/tags/v2.1.zip
           unzip -q winfsp.zip
-          echo "WINFSP_INC=$(pwd)/winfsp-2.0/inc/fuse" >> $GITHUB_ENV
+          echo "WINFSP_INC=$(pwd)/winfsp-2.1/inc/fuse" >> $GITHUB_ENV
 
       - name: Setup Icon (Windows Only)
         if: steps.gate.outputs.skip == 'false' && matrix.goos == 'windows'
@@ -119,7 +119,7 @@ jobs:
           # Setup Variabili
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          VERSION=$(echo "v1.73.0-extra")
+          VERSION=$(echo "v1.73.1-extra")
 
           # Flag base: strip debug (-s -w) e versione
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
