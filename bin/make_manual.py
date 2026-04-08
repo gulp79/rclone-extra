@@ -94,7 +94,6 @@ docs = [
     "sugarsync.md",
     "terabox.md",
     "ulozto.md",
-    "uptobox.md",
     "union.md",
     "webdav.md",
     "yandex.md",

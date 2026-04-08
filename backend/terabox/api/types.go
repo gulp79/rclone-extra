@@ -51,6 +51,16 @@ type ResponseOperational struct {
 		ErrorAPI
 		Path string `json:"path"`
 	} `json:"info"`
+	TaskID int64 `json:"taskid"`
+}
+
+// ResponseTask result of async task execution
+type ResponseTask struct {
+	ErrorAPI
+	List []struct {
+		ErrorAPINew
+	} `json:"list"`
+	Status string `json:"status"` // "running", "failed", "success"
 }
 
 // ResponseDownload contain Download link
@@ -90,7 +100,8 @@ type ResponseQuota struct {
 // ResponseFileLocateUpload host for file uploading
 type ResponseFileLocateUpload struct {
 	ErrorAPI
-	Host string `json:"host"`
+	Host   string `json:"host"`
+	Expire int64  `json:"expire"`
 }
 
 // ResponsePrecreate params of created file
@@ -122,7 +133,8 @@ type ResponseUser struct {
 	ErrorAPI
 	Data struct {
 		MemberInfo struct {
-			IsVIP int64 `json:"is_vip"`
+			IsVIP      int64 `json:"is_vip"`
+			VIPLeftSec int64 `json:"vip_left_time"`
 		} `json:"member_info"`
 	} `json:"data"`
 }

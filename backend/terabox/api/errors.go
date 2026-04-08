@@ -178,3 +178,31 @@ func (err ErrorAPI) Err() error {
 
 	return err
 }
+
+// ErrorAPINew - Terabox API error New
+type ErrorAPINew struct {
+	ErrNumber int `json:"error_code"`
+}
+
+// ErrorNumber return Terabox error number
+func (err ErrorAPINew) ErrorNumber() int {
+	return err.ErrNumber
+}
+
+// Error is Error Interface implementation
+func (err ErrorAPINew) Error() string {
+	if _, ok := errorsDescription[err.ErrNumber]; ok {
+		return errorsDescription[err.ErrNumber]
+	}
+
+	return fmt.Sprintf("Unknown error %d", err.ErrNumber)
+}
+
+// Err return the error if number of error not 0, otherwise nil
+func (err ErrorAPINew) Err() error {
+	if err.ErrNumber == 0 {
+		return nil
+	}
+
+	return err
+}

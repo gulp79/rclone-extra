@@ -142,7 +142,7 @@ type Fs struct {
 	// official access [added for future releases]
 	accessToken string
 
-	// unofficial access [web token required for upload]
+	// unofficial access [web token required for upload/move/copy]
 	jsToken string
 
 	isPremium   bool
@@ -183,7 +183,18 @@ func NewFs(ctx context.Context, name string, root string, config configmap.Mappe
 		root: root,
 		opt:  opt,
 
-		baseURL: opt.Domain,
+		baseURL: ConfigGetDefault(config, "baseURL", opt.Domain),
+		jsToken: ConfigGetDefault(config, "jsToken", ""),
+	}
+
+	if p := ConfigGetDefaultNotExpired[*bool](config, "premium", nil); p != nil {
+		f.isPremium = *p
+		f.isPremiumMX.Do(func() {}) // lock the mutex if premium checked in last 24 hours or real expiration date
+	}
+
+	if uh := ConfigGetDefaultNotExpired(config, "uploadHost", ""); uh != "" {
+		f.uploadHost = uh
+		f.uploadHostMX.Do(func() {}) // lock the mutex if uploadHost not expired
 	}
 
 	f.features = (&fs.Features{
@@ -466,7 +477,7 @@ func (f *Fs) PutUnchecked(ctx context.Context, in io.Reader, src fs.ObjectInfo, 
 //
 // If it isn't possible then return fs.ErrorCantCopy
 func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	debug(f.opt, 1, "Copy %+v; %s;", src, remote)
+	debug(f.opt, 1, "Server side Copy %+v; %s;", src, remote)
 
 	srcObj, ok := src.(*Object)
 	if !ok {
@@ -486,7 +497,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 		}
 	}
 
-	if err := f.apiOperation(ctx, "copy", []api.OperationalItem{{Path: f.opt.Enc.FromStandardPath(srcPath), Destination: f.opt.Enc.FromStandardPath(dstPath), NewName: f.opt.Enc.FromStandardName(dstFile)}}); err != nil {
+	if err := f.apiOperation(ctx, "copy", []api.OperationalItem{{Path: f.opt.Enc.FromStandardPath(srcPath), Destination: f.opt.Enc.FromStandardPath(dstPath), NewName: f.opt.Enc.FromStandardName(dstFile), OnDuplicate: "overwrite"}}); err != nil {
 		return nil, fmt.Errorf("couldn't copy file: %w", err)
 	}
 
@@ -505,7 +516,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 //
 // If it isn't possible then return fs.ErrorCantMove
 func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object, error) {
-	debug(f.opt, 1, "Move %+v; %s;", src, remote)
+	debug(f.opt, 1, "Server side Move %+v; %s;", src, remote)
 
 	srcObj, ok := src.(*Object)
 	if !ok {

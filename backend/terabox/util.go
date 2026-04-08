@@ -2,14 +2,18 @@ package terabox
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/textproto"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/lib/rest"
 )
 
@@ -142,4 +146,152 @@ func TBPath(path string) string {
 	}
 
 	return path
+}
+
+type confSupportedTypes interface {
+	string | int | int8 | int16 | int32 | int64 | uint | uint8 | uint16 | uint32 | uint64 | bool | *bool
+}
+
+func configSet(name, key string, val any) error {
+	switch v := val.(type) {
+	case string:
+		config.FileSetValue(name, key, v)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		config.FileSetValue(name, key, fmt.Sprintf("%d", v))
+	case bool:
+		if v {
+			config.FileSetValue(name, key, "true")
+		} else {
+			config.FileSetValue(name, key, "false")
+		}
+	case time.Time:
+		config.FileSetValue(name, key, v.Format(time.RFC3339))
+	default:
+		return errors.New("unsupported value type")
+	}
+
+	return nil
+}
+
+// ConfigSet write value to config file
+func ConfigSet(name, key string, val any) error {
+	if err := configSet(name, key, val); err != nil {
+		return err
+	}
+
+	config.SaveConfig()
+	return nil
+}
+
+// ConfigSetExpire write value to config file with expiration date
+func ConfigSetExpire(name, key string, val any, expire time.Time) error {
+	if err := configSet(name, key, val); err != nil {
+		return err
+	}
+
+	if err := configSet(name, key+"_expire", expire); err != nil {
+		return err
+	}
+
+	config.SaveConfig()
+	return nil
+}
+
+func readConfig[T confSupportedTypes](config configmap.Mapper, key string) (T, bool) {
+	v, ok := config.Get(key)
+	if !ok {
+		return *new(T), false
+	}
+
+	switch any(*new(T)).(type) {
+	case string:
+		return any(v).(T), true
+
+	case int:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(vInt).(T), true
+		}
+
+	case int8:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(int8(vInt)).(T), true
+		}
+
+	case int16:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(int16(vInt)).(T), true
+		}
+
+	case int32:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(int32(vInt)).(T), true
+		}
+
+	case int64:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(int64(vInt)).(T), true
+		}
+
+	case uint:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(uint(vInt)).(T), true
+		}
+
+	case uint8:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(uint8(vInt)).(T), true
+		}
+
+	case uint16:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(uint16(vInt)).(T), true
+		}
+
+	case uint32:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(uint32(vInt)).(T), true
+
+		}
+
+	case uint64:
+		if vInt, err := strconv.Atoi(v); err == nil {
+			return any(uint64(vInt)).(T), true
+		}
+
+	case bool:
+		return any(v == "true").(T), true
+
+	case *bool:
+		vb := v == "true"
+		return any(&vb).(T), true
+	}
+
+	return *new(T), false
+}
+
+// ConfigGetDefault read string value from config and convert it into required type
+func ConfigGetDefault[T confSupportedTypes](config configmap.Mapper, key string, def T) T {
+	if v, ok := readConfig[T](config, key); ok {
+		return v
+	}
+
+	return def
+}
+
+// ConfigGetDefaultNotExpired read string value from config and convert it into required type, return value if not expired
+func ConfigGetDefaultNotExpired[T confSupportedTypes](config configmap.Mapper, key string, def T) T {
+	if v, ok := readConfig[T](config, key); ok {
+		if expStr, ok := readConfig[string](config, key+"_expire"); ok {
+			exp, err := time.Parse(time.RFC3339, expStr)
+			if err != nil || exp.IsZero() {
+				return def
+			}
+
+			if exp.After(time.Now()) {
+				return v
+			}
+		}
+	}
+
+	return def
 }

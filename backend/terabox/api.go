@@ -89,8 +89,7 @@ retry:
 	if retry == 0 && opts.Method == http.MethodPost && opts.MultipartParams != nil {
 		var overhead int64
 		var err error
-		fileCT := "application/octet-stream"
-		opts.Body, opts.ContentType, overhead, err = rest.MultipartUpload(ctx, opts.Body, opts.MultipartParams, opts.MultipartContentName, opts.MultipartFileName, fileCT)
+		opts.Body, opts.ContentType, overhead, err = rest.MultipartUpload(ctx, opts.Body, opts.MultipartParams, opts.MultipartContentName, opts.MultipartFileName, opts.MultipartContentType)
 		if err != nil {
 			return err
 		}
@@ -99,26 +98,13 @@ retry:
 		}
 	}
 
-	var reqBody *bytes.Buffer
-	if f.opt.DebugLevel >= 4 && opts.Body != nil && !strings.Contains(opts.RootURL, "/superfile2") {
-		reqBody = bytes.NewBuffer(make([]byte, 0))
-		opts.Body = io.TeeReader(opts.Body, reqBody)
-	}
-
 	resp, err := f.client.Call(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	debug(f.opt, 3, "Request: %+v", resp.Request)
-	if reqBody != nil {
-		debug(f.opt, 4, "Request body: %s", reqBody.String())
-	}
-
-	debug(f.opt, 2, "Response: %+v", resp)
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
-	debug(f.opt, 2, "Response body: %s", body)
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		err = fmt.Errorf("http error %d: %v", resp.StatusCode, resp.Status)
@@ -140,8 +126,8 @@ retry:
 	}
 
 	var jsTokenRequested bool
-	if _, skip := res.(*api.ResponseUploadedChunk); !skip {
-		if err, ok := res.(api.ErrorInterface); ok {
+	if _, skip := res.(*api.ResponseUploadedChunk); !skip { // if request was a upload chunk, then skip error check, because chank upload  response not compatible with error interface
+		if err, ok := res.(api.ErrorInterface); ok { // if error from Terabox, not a connection or io
 			if api.ErrIsNum(err, 4000023, 450016) && !jsTokenRequested {
 				jsTokenRequested = true
 				if err := f.apiJsToken(ctx); err != nil {
@@ -164,6 +150,9 @@ retry:
 				newBaseURL := "https://" + prefix[0] + "." + hostParts[len(hostParts)-2] + "." + hostParts[len(hostParts)-1]
 				f.client.SetRoot(newBaseURL)
 				debug(f.opt, 1, "Base URL changed from %s to %s", f.baseURL, newBaseURL)
+				if err := ConfigSet(f.name, "baseURL", newBaseURL); err != nil {
+					debug(f.opt, 1, "Can't save new baseURL %s to config, %s", newBaseURL, err)
+				}
 
 				retry++
 				goto retry
@@ -190,11 +179,15 @@ func (f *Fs) apiJsToken(ctx context.Context) error {
 
 	jsToken := getStrBetween(string(body), "`function%20fn%28a%29%7Bwindow.jsToken%20%3D%20a%7D%3Bfn%28%22", "%22%29`")
 	if jsToken == "" {
-		debug(f.opt, 3, "jsToken not found, body: %s", string(body))
+		debug(f.opt, 1, "jsToken not found, body: %s", string(body))
 		return fmt.Errorf("jsToken not found")
 	}
 
 	f.jsToken = jsToken
+	if err := ConfigSet(f.name, "jsToken", jsToken); err != nil {
+		debug(f.opt, 1, "Can't save jsToken to config, %s", err)
+	}
+
 	return nil
 }
 
@@ -225,6 +218,13 @@ func (f *Fs) apiCheckPremium(ctx context.Context) error {
 
 	// Premium type: 0: regular user; 1: regular Premium; 2: super Premium
 	f.isPremium = res.Data.MemberInfo.IsVIP > 0
+	if res.Data.MemberInfo.VIPLeftSec <= 0 {
+		res.Data.MemberInfo.VIPLeftSec = 24 * 60 * 60 // check vip every 24 hours if not get it from Terabox
+	}
+
+	if err := ConfigSetExpire(f.name, "premium", f.isPremium, time.Now().Add(time.Duration(res.Data.MemberInfo.VIPLeftSec)*time.Second)); err != nil {
+		debug(f.opt, 1, "Can't save premium state to config, %s", err)
+	}
 	return nil
 }
 
@@ -325,7 +325,11 @@ func (f *Fs) apiMkDir(ctx context.Context, path string) error {
 func (f *Fs) apiOperation(ctx context.Context, operation string, items []api.OperationalItem) error {
 	opt := NewRequest(http.MethodPost, "/api/filemanager")
 	opt.Parameters.Set("opera", operation)
-	opt.Parameters.Set("async", "1") // The default value is 0 [not available anymore, use 1]; 0: synchronous; 1: adaptive; 2: asynchronous. The difference lies in whether to care about the success of the request, and the returned structure differs. Different structures are returned based on the request parameters; see the return examples for details.)
+	if operation == "copy" {
+		opt.Parameters.Set("async", "2") // The default value is 0 [not available anymore, use 1]; 0: synchronous; 1: adaptive (in adaptive mode onDuplicate not available); 2: asynchronous. The difference lies in whether to care about the success of the request, and the returned structure differs. Different structures are returned based on the request parameters; see the return examples for details.)
+	} else {
+		opt.Parameters.Set("async", "1")
+	}
 	opt.Parameters.Set("onnest", "fail")
 
 	// get JS token
@@ -363,14 +367,20 @@ func (f *Fs) apiOperation(ctx context.Context, operation string, items []api.Ope
 		return err
 	}
 
-	for _, oi := range res.Info {
-		if oi.Err() != nil {
-			return oi.Err()
+	if res.TaskID > 0 {
+		if err := f.apiTaskResult(ctx, res.TaskID); err != nil {
+			return err
 		}
-	}
+	} else {
+		for _, oi := range res.Info {
+			if oi.Err() != nil {
+				return oi.Err()
+			}
+		}
 
-	if res.Err() != nil {
-		return res.Err()
+		if res.Err() != nil {
+			return res.Err()
+		}
 	}
 
 	if operation == "delete" && f.opt.DeletePermanently {
@@ -380,6 +390,39 @@ func (f *Fs) apiOperation(ctx context.Context, operation string, items []api.Ope
 	}
 
 	return nil
+}
+
+// checking result of async operation
+func (f *Fs) apiTaskResult(ctx context.Context, taskID int64) error {
+	opt := NewRequest(http.MethodGet, "/share/taskquery")
+	opt.Parameters.Set("taskid", fmt.Sprintf("%d", taskID))
+
+	for t := range 3 {
+		var res api.ResponseTask
+		err := f.apiExec(ctx, opt, &res)
+		if err != nil {
+			return err
+		}
+
+		if res.Status == "running" {
+			time.Sleep(time.Duration(t) * time.Second)
+			continue
+		}
+
+		for _, t := range res.List {
+			if t.Err() != nil {
+				return t.Err()
+			}
+		}
+
+		if res.Err() != nil {
+			return res.Err()
+		}
+
+		return nil
+	}
+
+	return errors.New("timeout async operation")
 }
 
 // Download file
@@ -658,7 +701,11 @@ func (f *Fs) apiFileLocateUpload(ctx context.Context) error {
 	}
 
 	f.uploadHost = res.Host
-
+	if res.Expire > 0 {
+		if err := ConfigSetExpire(f.name, "uploadHost", f.uploadHost, time.Now().Add(time.Duration(res.Expire)*time.Second)); err != nil {
+			debug(f.opt, 1, "Can't save uploadHost state to config, %s", err)
+		}
+	}
 	return nil
 }
 
@@ -746,8 +793,6 @@ func (f *Fs) _apiFileUploadCreate(ctx context.Context, path, uploadID string, si
 		return nil, err
 	}
 	opt.MultipartParams.Set("block_list", string(blockListStr))
-
-	debug(f.opt, 3, "%+v", opt.MultipartParams)
 
 	var res api.ResponseCreate
 	if err := f.apiExec(ctx, opt, &res); err != nil {
