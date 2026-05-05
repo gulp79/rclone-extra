@@ -21,7 +21,7 @@ type User struct {
 	Avatar           string      `json:"avatar"`
 	ModelType        string      `json:"model_type"`
 	OwnsEntry        bool        `json:"owns_entry"`
-	EntryPermissions []any       `json:"entry_permissions"`
+	EntryPermissions any         `json:"entry_permissions"`
 	DisplayName      string      `json:"display_name"`
 }
 
@@ -77,9 +77,9 @@ type Listing struct {
 	Data        []Item `json:"data"`
 	From        int    `json:"from"`
 	LastPage    int    `json:"last_page"`
-	NextPage    int    `json:"next_page"`
+	NextPageURL string `json:"next_page_url"`
 	PerPage     int    `json:"per_page"`
-	PrevPage    int    `json:"prev_page"`
+	PrevPageURL string `json:"prev_page_url"`
 	To          int    `json:"to"`
 	Total       int    `json:"total"`
 }
