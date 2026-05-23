@@ -1123,3 +1123,19 @@ put them back in again. -->
 - Yakov Till <37628546+Lyapsus@users.noreply.github.com>
 - Chris Coughlan <chris@coughlan.io>
 - John Volk <volkjohn@users.noreply.github.com>
+- 王一赫 <wyihe5220@gmail.com>
+- Gustavo V. F. <31892323+Gustavo-V-F@users.noreply.github.com>
+- Sven Rebhan <36194019+srebhan@users.noreply.github.com>
+- Copilot <223556219+Copilot@users.noreply.github.com>
+- KTibow <KTibow@users.noreply.github.com>
+- kkocdko <31189892+kkocdko@users.noreply.github.com>
+- Tim Schumacher <tim@tschumacher.net>
+- ferrumclaudepilgrim <ferrumclaudepilgrim@users.noreply.github.com>
+- Alvinwylim <31592545+Alvinwylim@users.noreply.github.com>
+- Tore Anderson <tore@fud.no>
+- Sai Asish Y <say.apm35@gmail.com>
+- Lucky945H <1355363613@qq.com>
+- William Tange <github@tan.ge>
+- TaterLi <admin@lijingquan.net>
+- KyokoMiki <161209740+kyokomiki@users.noreply.github.com>
+- Iizuki <36295229+Iizuki@users.noreply.github.com>

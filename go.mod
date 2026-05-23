@@ -42,7 +42,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-darwin/apfs v0.0.0-20211011131704-f84b94dbf348
-	github.com/go-git/go-billy/v5 v5.8.0
+	github.com/go-git/go-billy/v5 v5.9.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
@@ -71,8 +71,8 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/putdotio/go-putio/putio v0.0.0-20200123120452-16d982cac2b8
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
-	github.com/rclone/Proton-API-Bridge v1.0.1
-	github.com/rclone/go-proton-api v1.0.1
+	github.com/rclone/Proton-API-Bridge v1.0.3
+	github.com/rclone/go-proton-api v1.0.2
 	github.com/rclone/gofakes3 v0.0.4
 	github.com/rfjakob/eme v1.2.0
 	github.com/rivo/uniseg v0.4.7
@@ -94,12 +94,12 @@ require (
 	github.com/zeebo/xxh3 v1.1.0
 	go.etcd.io/bbolt v1.4.3
 	goftp.io/server/v2 v2.0.2
-	golang.org/x/crypto v0.49.0
-	golang.org/x/net v0.52.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/net v0.55.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.42.0
-	golang.org/x/text v0.36.0
+	golang.org/x/sys v0.45.0
+	golang.org/x/text v0.37.0
 	golang.org/x/time v0.15.0
 	google.golang.org/api v0.275.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -261,9 +261,9 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
-	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect
-	golang.org/x/image v0.39.0 // indirect
-	golang.org/x/tools v0.43.0 // indirect
+	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+	golang.org/x/image v0.41.0 // indirect
+	golang.org/x/tools v0.44.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
@@ -284,5 +284,5 @@ require (
 	github.com/pkg/xattr v0.4.12
 	github.com/pquerna/otp v1.5.0
 	golang.org/x/mobile v0.0.0-20260312152759-81488f6aeb60
-	golang.org/x/term v0.41.0
+	golang.org/x/term v0.43.0
 )
