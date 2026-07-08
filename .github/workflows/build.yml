@@ -271,27 +271,3 @@ jobs:
         with:
           name: logs-android
           path: build-logs/build-android-*.log
-
-
-  # --- JOB: PUBLISH (solo su tag push, dopo che build e android sono completati) ---
-  # PRE-REQUISITI (una tantum, da fare manualmente su GitHub, non nel workflow):
-  #  1. Fork di https://github.com/microsoft/winget-pkgs sotto l'account gulp79
-  #     (winget-releaser / komac NON creano il fork automaticamente).
-  #  2. Secret di repo "WINGET_TOKEN": PAT classico (non fine-grained) con
-  #     scope "public_repo".
-  publish:
-    name: Publish to WinGet
-    runs-on: ubuntu-latest
-    needs: [build, android]
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - name: Submit to WinGet via winget-releaser
-        uses: vedantmgoyal2009/winget-releaser@v2
-        with:
-          identifier: Rclone.Rclone
-          installers-regex: 'rclone-windows-\w+\.zip$'
-          max-versions-to-keep: 0
-          release-tag: ${{ github.ref_name }}
-          fork-user: gulp79
-          token: ${{ secrets.WINGET_TOKEN }}
