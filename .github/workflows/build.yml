@@ -83,7 +83,7 @@ jobs:
         if: steps.gate.outputs.skip == 'false'
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # necessario per "git describe": serve la storia completa + tag
 
       - name: Install Go
         if: steps.gate.outputs.skip == 'false'
@@ -100,6 +100,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mingw-w64
 
+      # Necessario per compilare il tag "cmount" su Windows: senza gli header FUSE
+      # di WinFsp, cmount non viene nemmeno compilato/incluso nel binario Windows.
       - name: Setup WinFsp Headers (Windows Only)
         if: steps.gate.outputs.skip == 'false' && matrix.goos == 'windows'
         run: |
@@ -123,8 +125,16 @@ jobs:
           export GOARCH=${{ matrix.goarch }}
           ${{ matrix.goarm != '' && format('export GOARM={0}', matrix.goarm) || '# no GOARM' }}
 
-          VERSION="${{ github.ref_name }}"
-          if [ -z "$VERSION" ]; then VERSION="v1.73.2-extra"; fi
+          # Versione: usa sempre "git describe" invece di github.ref_name.
+          # github.ref_name NON è vuoto sui run manuali (workflow_dispatch):
+          # contiene il nome del branch (es. "master"), quindi il vecchio
+          # controllo "if [ -z "$VERSION" ]" non scattava mai e "master"
+          # veniva incorporato letteralmente come versione nel binario.
+          # git describe funziona bene in entrambi i casi:
+          #  - su un push di tag v1.74.4-extra          -> "v1.74.4-extra"
+          #  - su un run manuale dal branch master       -> "v1.74.4-extra-3-gabc1234"
+          VERSION="$(git describe --tags --always --dirty)"
+          echo "Versione rilevata: $VERSION"
 
           LDFLAGS_BASE="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
 
@@ -183,7 +193,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # necessario per "git describe"
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -195,8 +205,11 @@ jobs:
       - name: Build Android Targets
         run: |
           set -euo pipefail
-          VERSION="${{ github.ref_name }}"
-          if [ -z "$VERSION" ]; then VERSION="v1.73.2-android-extra"; fi
+
+          # Stessa logica di versioning del job "build": git describe invece
+          # di github.ref_name, che su workflow_dispatch non è mai vuoto.
+          VERSION="$(git describe --tags --always --dirty)"
+          echo "Versione rilevata: $VERSION"
           FLAGS="-s -w -buildid= -X github.com/rclone/rclone/fs.Version=${VERSION}"
 
           mkdir -p build build-logs
@@ -261,6 +274,11 @@ jobs:
 
 
   # --- JOB: PUBLISH (solo su tag push, dopo che build e android sono completati) ---
+  # PRE-REQUISITI (una tantum, da fare manualmente su GitHub, non nel workflow):
+  #  1. Fork di https://github.com/microsoft/winget-pkgs sotto l'account gulp79
+  #     (winget-releaser / komac NON creano il fork automaticamente).
+  #  2. Secret di repo "WINGET_TOKEN": PAT classico (non fine-grained) con
+  #     scope "public_repo".
   publish:
     name: Publish to WinGet
     runs-on: ubuntu-latest
