@@ -15,6 +15,43 @@ or [use HTTP directly](#api-http).
 If you just want to run a remote control then see the [rcd](/commands/rclone_rcd/)
 command.
 
+## Security {#security}
+
+**Access to the rc API is equivalent to shell access as the user running
+rclone.** Treat the rc port as you would an interactive login on the host.
+
+Any caller who can reach the API (and pass authentication, if it is enabled)
+can, among other things:
+
+- **Run OS commands** as the rclone user. `core/command` re-executes the rclone
+  binary with arbitrary arguments, and several backend options shell out to
+  programs, so even creating a remote with `config/create` can lead to command
+  execution.
+- **Read and write any file** reachable by the rclone process, by pointing
+  `operations/*` or `sync/*` at a `local` remote (or via `--rc-files` /
+  `--rc-serve`). Writing arbitrary files as the rclone user is itself a route to
+  code execution.
+- **Read back stored credentials.** rclone configs routinely hold cloud-provider
+  secrets. `config/dump` and friends expose them, so a compromise of the rc
+  reaches every configured backend.
+- **Change rclone's runtime behaviour** with `options/set`, **manage remotes**
+  with `config/*`, and **stop the process** with `core/quit`.
+
+There is currently no per-endpoint capability or scope system: authentication is
+all-or-nothing. Granting any access grants all of the above.
+
+Consequently:
+
+- **Do not bind the rc to a network address you do not control.** The default
+  bind is loopback (`localhost:5572`); keep it there unless you have a specific
+  reason to change it.
+- **Do not use `--rc-no-auth` on a non-loopback bind.** It disables
+  authentication on the endpoints that access remotes — see
+  [`--rc-no-auth`](#--rc-no-auth).
+- **Use authentication and TLS** (`--rc-user`/`--rc-pass` or `--rc-htpasswd`,
+  plus `--rc-cert`/`--rc-key`) whenever the port is reachable by anyone you do
+  not fully trust, and raise `--rc-min-tls-version`.
+
 ## Supported parameters
 
 ### --rc
@@ -78,7 +115,25 @@ so you can browse to `http://127.0.0.1:5572/` or `http://127.0.0.1:5572/*`
 to see a listing of the remotes.  Objects may be requested from
 remotes using this syntax `http://127.0.0.1:5572/[remote:path]/path/to/object`
 
+Unless the rc server has authentication configured (`--rc-user`/`--rc-pass`
+or `--rc-htpasswd`) or the `--rc-no-auth` flag is set, only remotes already
+present in the config file may be served this way. Inline remotes (e.g.
+`[:webdav,url=...:]`), connection string parameters and bare local paths are
+rejected, since instantiating them from an unauthenticated request could run
+commands or read arbitrary local files.
+
 Default Off.
+
+### global.* connection string options and the rc
+
+Remotes instantiated by the rc do not let [connection
+string](/docs/#connection-strings) `global.*` options change rclone's
+process-wide configuration. Remotes created directly on the command
+line or defined in the config file are unaffected.
+
+A `global.*` option still takes effect for the individual backend it
+is set on (exactly like an `override.*` option), it just does not leak
+into the global config for the rest of the process.
 
 ### --rc-serve-no-modtime
 
