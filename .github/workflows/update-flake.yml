@@ -1,0 +1,57 @@
+name: Update Nix flake
+
+on:
+  # Runs once the release build has uploaded its assets
+  workflow_run:
+    workflows: ["Build rclone-extra - Multi Platform"]
+    types: [completed]
+  # Fallback in case a run was missed
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to pin (default is the latest release)
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-flake
+  cancel-in-progress: false
+
+jobs:
+  update:
+    # For workflow_run, only continue if the build succeeded
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Update nix/version.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash nix/update.sh ${{ inputs.tag }}
+
+      - name: Check the flake still evaluates
+        run: nix flake show --no-write-lock-file
+
+      - name: Commit and push
+        run: |
+          if git diff --quiet -- nix/version.json; then
+            echo "No changes"
+            exit 0
+          fi
+          tag=$(jq -r .tag nix/version.json)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nix/version.json
+          git commit -m "nix: update flake to ${tag}"
+          git push
