@@ -1,9 +1,9 @@
 {
-  "repo": "j-a-sunny/rclone-extra",
-  "tag": "v1.75.1",
+  "repo": "gulp79/rclone-extra",
+  "tag": "v1.75.1-extra",
   "hashes": {
-    "x86_64-linux": "",
-    "aarch64-linux": "",
-    "armv7l-linux": ""
+    "x86_64-linux": "sha256-3qc3hMOpR80VRL1Dl2pxYgTTOjsehTP3QTABCfXleJg=",
+    "aarch64-linux": "sha256-UZP6Ut2vSzuWg5wW7GeQQmwjuSq+kJtfGsUUJ4pUEo0=",
+    "armv7l-linux": "sha256-y8X7FuHJPYbyGAWZXgwIqe9xo6mi3w5EfX8fi9k7LlU="
   }
 }
