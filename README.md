@@ -203,6 +203,83 @@ Please see the [rclone website](https://rclone.org/) for:
 
 - <https://rclone.org/downloads/>
 
+## Installing with Nix
+
+The repository ships a [Nix flake](https://nixos.wiki/wiki/Flakes) that
+installs the prebuilt binary from the
+[latest release](https://github.com/gulp79/rclone-extra/releases/latest)
+instead of building from source. It is available for `x86_64-linux`,
+`aarch64-linux` and `armv7l-linux`.
+
+The package is called `rclone-extra`, but the binary it installs is `rclone`.
+
+### Try it without installing
+
+```bash
+nix run github:gulp79/rclone-extra -- version
+nix shell github:gulp79/rclone-extra   # shell with `rclone` on PATH
+```
+
+### Install into your user profile
+
+```bash
+nix profile install github:gulp79/rclone-extra
+```
+
+### NixOS / home-manager
+
+Add the flake as an input:
+
+```nix
+{
+  inputs.rclone-extra.url = "github:gulp79/rclone-extra";
+  # keep the flake from pulling its own copy of nixpkgs (optional)
+  inputs.rclone-extra.inputs.nixpkgs.follows = "nixpkgs";
+}
+```
+
+Then add the package, either to the system:
+
+```nix
+environment.systemPackages = [
+  inputs.rclone-extra.packages.${pkgs.stdenv.hostPlatform.system}.default
+];
+```
+
+or with home-manager:
+
+```nix
+home.packages = [
+  inputs.rclone-extra.packages.${pkgs.stdenv.hostPlatform.system}.default
+];
+```
+
+An overlay is also available as `inputs.rclone-extra.overlays.default`, which
+adds `pkgs.rclone-extra`.
+
+Because the binary is named `rclone`, do not install it alongside nixpkgs'
+`rclone` in the same profile or `systemPackages`: the two will conflict.
+
+### Notes
+
+- `rclone mount` needs `fusermount3` on `PATH`. On NixOS the setuid wrapper in
+  `/run/wrappers/bin` normally provides it.
+- Building from a local checkout works too: `nix build` and then
+  `./result/bin/rclone version`.
+
+### How the flake is kept up to date
+
+The release tag and the hashes of the release assets are stored in
+[`nix/version.json`](nix/version.json). The
+[`update-flake`](.github/workflows/update-flake.yml) workflow runs after each
+release build, runs [`nix/update.sh`](nix/update.sh) and commits the new tag
+and hashes. You can run the script yourself to update by hand:
+
+```bash
+nix/update.sh            # latest release
+nix/update.sh v1.75.1-extra   # a specific tag
+```
+
 # **How to Add a Terabox Remote in rclone-extra**
 
 The Terabox backend requires authentication using your account’s **cookie** because Terabox does not provide an official API. Follow these steps:
