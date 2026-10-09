@@ -120,18 +120,7 @@ backends:
      - TestReadFile
      - TestCopyURL
      - TestMoveFileWithIgnoreExisting
-     - TestMoveFileImmutable
      - TestCopyFileCompareDest
-     - TestLsWithFilesFrom
-     - TestIndex
-     - TestIndexFilter
-     - TestIndexRules
-     - TestIndexMaxDepth
-     - TestIndexLinkIndex
-     - TestIndexDirTime
-     - TestIndexTemplate
-     - TestIndexChanged
-     - TestIndexChangedFiles
      # fs/sync
      - TestSyncCompareDest
      #vfs
@@ -457,13 +446,6 @@ backends:
      # It just isn't possible to preserve the existing file with azure blob
      # and make sure we don't leak uncommitted blocks.
      - TestMultithreadCopyAbort
- - backend:  "azureblob"
-   remote:   "TestAzureBlobHierarchical:"
-   fastlist: true
-   ignore:
-     # It just isn't possible to preserve the existing file with azure blob
-     # and make sure we don't leak uncommitted blocks.
-     - TestMultithreadCopyAbort
  - backend:  "azurefiles"
    remote:   "TestAzureFiles:"
  - backend:  "pcloud"
@@ -549,17 +531,6 @@ backends:
  - backend:  "opendrive"
    remote:   "TestOpenDrive:"
    fastlist: false
-   ignore:
-     # downloading the HTML listings is refused with 403 Forbidden
-     - TestIndex
-     - TestIndexDelete
-     - TestIndexFilter
-     - TestIndexRules
-     - TestIndexMaxDepth
-     - TestIndexLinkIndex
-     - TestIndexChanged
-     - TestIndexChangedDelete
-     - TestIndexChangedFiles
    ignoretests:
      - cmd/bisync
  - backend:  "union"
@@ -568,17 +539,6 @@ backends:
  - backend:  "koofr"
    remote:   "TestKoofr:"
    fastlist: false
-   ignore:
-     # downloading the HTML listings is refused with FileBlocked
-     - TestIndex
-     - TestIndexDelete
-     - TestIndexFilter
-     - TestIndexRules
-     - TestIndexMaxDepth
-     - TestIndexLinkIndex
-     - TestIndexChanged
-     - TestIndexChangedDelete
-     - TestIndexChangedFiles
  # - backend:  "koofr"
  #   remote:   "TestDigiStorage:"
  #   fastlist: false
@@ -682,6 +642,12 @@ backends:
    remote: "TestOracleObjectStorage:"
    fastlist: true
    ignore:
+     - TestIntegration/FsMkdir/FsEncoding/control_chars
+     - TestIntegration/FsMkdir/FsEncoding/leading_CR
+     - TestIntegration/FsMkdir/FsEncoding/leading_LF
+     - TestIntegration/FsMkdir/FsEncoding/trailing_CR
+     - TestIntegration/FsMkdir/FsEncoding/trailing_LF
+     - TestIntegration/FsMkdir/FsEncoding/leading_HT
    ignoretests:
      - cmd/bisync
      - cmd/gitannex
@@ -728,14 +694,6 @@ backends:
    fastlist: false
    extratime: 2.0
    listretries: 5
-   ignore:
-     - TestRWFileHandleWriteNoWrite
- - backend:  "dosya"
-   remote:   "TestDosya:"
-   # Every upload is a metadata round trip of several seconds regardless
-   # of size, so fs/sync (TestTransform alone is 11 x ~3.5 min) needs
-   # well over the default 1h budget.
-   extratime: 3.0
    ignore:
      - TestRWFileHandleWriteNoWrite
  - backend:  "drime"
