@@ -201,7 +201,7 @@ Please see the [rclone website](https://rclone.org/) for:
 
 ## Downloads
 
-- <https://rclone.org/downloads/>
+- <https://github.com/gulp79/rclone-extra/releases/>
 
 ## Installing with Nix
 
