@@ -1,0 +1,9 @@
+{
+  "repo": "gulp79/rclone-extra",
+  "tag": "v1.75.2-extra",
+  "hashes": {
+    "x86_64-linux": "sha256-eIVTJaKo2Ds/7uOoNj0y4SEbq79M2mNW+oyl9HIHUGI=",
+    "aarch64-linux": "sha256-YjLD1NQb4nxxvMY/zIbPjUeg63XLjhsIVzpEt0nFfLY=",
+    "armv7l-linux": "sha256-BTjmK46urPjlN7luQXThSGez4yuIFYxQQgC0AlSyOCA="
+  }
+}
