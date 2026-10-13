@@ -1,18 +1,22 @@
 [![GitHub release](https://img.shields.io/github/v/release/gulp79/rclone-extra?include_prereleases)](https://github.com/gulp79/rclone-extra/releases/latest)  ![Total Downloads](https://img.shields.io/github/downloads/gulp79/rclone-extra/total)  ![Latest Downloads](https://img.shields.io/github/downloads/gulp79/rclone-extra/latest/total)
 
 > ⚠️ **Unofficial Fork Disclaimer**  
-> This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alist**, **iCloud Photos**, **Teldrive** and **Terabox** support.
+> This is an **unofficial fork** of [rclone](https://rclone.org), with additional enhancements such as **Alist**, **Alldebrid**, **iCloud Photos**, **[Teldrive](https://github.com/tgdrive/teldrive)** and **[Terabox](https://github.com/x1arch/rclone/tree/backend/terabox)** support.
 > Used also in https://github.com/gulp79/Round-Sync an Android GUI to Rclone.
 > I am **not affiliated with the upstream maintainers**, and this fork **does not intend to be malicious or harmful** in any way.  
 > Please **read the source code** if you're unsure or want to verify that it behaves as described.  
 > Contributions, feedback, and scrutiny are welcome.  
 
 > Terabox code is taken from https://github.com/x1arch/rclone/tree/backend/terabox  
-> Others backend are from https://github.com/BenjiThatFoxGuy/bclone 
+> Alist, Alldebrid and iCloud Photos backend are from https://github.com/BenjiThatFoxGuy/bclone
+> and Teldrive backend is from https://github.com/tgdrive/rclone
 
 <!-- markdownlint-disable-next-line first-line-heading no-inline-html -->
+
 [<img src="https://rclone.org/img/logo_on_light__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-light-mode-only)
+
 <!-- markdownlint-disable-next-line no-inline-html -->
+
 [<img src="https://rclone.org/img/logo_on_dark__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-dark-mode-only)
 
 [Website](https://rclone.org) |
@@ -350,7 +354,7 @@ If everything is correct, you should see your files listed.
   ```
   chmod 600 ~/.config/rclone/rclone.conf
   ```
-  
+
 ## License
 
 This is free software under the terms of the MIT license (check the

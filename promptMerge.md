@@ -12,7 +12,7 @@ https://github.com/rclone/rclone
 
 MISSION
 
-Synchronize the custom fork with the latest upstream rclone version while preserving all custom functionality.
+Synchronize the custom fork with the latest upstream rclone released version while preserving all custom functionality.
 
 This repository intentionally diverges from upstream and contains:
 
@@ -303,5 +303,3 @@ Never stop at conflict detection.
 Produce the best merged solution possible.
 
 Document assumptions explicitly.
-
-``
