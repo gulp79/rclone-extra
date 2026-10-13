@@ -1,134 +1,307 @@
-# AGENTS.md
+# rclone-extra Merge Agents
 
-This file provides guidance to AI coding agents (e.g. Claude Code, Codex, Cursor, Gemini CLI, and similar tools) when working with code in this repository.
+## Mission
 
-Rclone welcomes AI-assisted contributions, but the expectation is that you, the human submitter, understand every line you propose and have compiled and tested it against real rclone code - not just generated it. See the "AI-assisted contributions" section of [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Maintain rclone-extra as a long-term fork of upstream rclone.
 
-## Project Overview
+The repository contains custom backends and core modifications that must survive every upstream update.
 
-Rclone is a command-line program to sync files and directories to and from cloud storage providers. It's written in Go and supports 70+ backends (cloud storage systems). Think "rsync for cloud storage".
+The primary goal is preserving custom functionality while adopting upstream improvements.
 
-## General Notes
+Read `.custom-merge-manifest.yml` before any analysis.
 
-**We take backwards compatibility very seriously.** PRs should not change the observable behaviour of existing commands, flags or rc API without very good reason. Rclone does not try to preserve a stable Go API but try not to change it gratuitously.
+All components declared there are merge-protected.
 
-Rclone operates with a lot of different backends, so **compatibility is key**. It is the backend integration tests which guarantee that compatibility. Changes should consider both known and unknown backends and should take care not to break functionality of existing installations.
+---
 
-The core parts of rclone under `fs` and `vfs` need to work with all backends and **backend specific hacks won't be merged**. Fixes likely need to go in the relevant backend or if new behaviour is really needed, a new Feature flag needs to be added.
+# Agent: Upstream Analyst
 
-**Changes should be kept to the minimum.** Work hard to make the most elegant, smallest change you can. Do not refactor or re-order code unless necessary as this makes review more challenging. Re-use existing test scaffolding, existing or library routines (e.g. `lib`) where possible.
+Responsibilities:
 
-Make sure added tests **actually test the code you have written** and test the intention behind the change. If you are fixing a problem, write the tests first to reproduce the problem before starting on the fix.
+- Analyze upstream releases.
 
-## Build and Test Commands
+- Review changelogs.
 
-```bash
-# Build rclone (simple)
-go build
+- Review commits.
 
-# Build with version info (preferred)
-make
+- Detect API changes.
 
-# Run all unit tests (no cloud credentials needed)
-make quicktest
-# or equivalently:
-RCLONE_CONFIG="/notfound" go test ./...
+- Detect interface changes.
 
-# Run tests for a specific package
-cd backend/memory && go test -v
-# or from root:
-go test -v ./backend/memory/
+- Detect package moves.
 
-# Run a single test
-go test -v -run TestIntegration/FsCheckWrap ./backend/memory/
+- Detect renamed functions.
 
-# Run tests with race detector
-make racequicktest
+- Detect renamed structs.
 
-# Lint (requires golangci-lint)
-golangci-lint run ./...
+- Detect breaking changes.
 
-# Run backend integration tests (requires configured TestRemote remote)
-cd backend/drive && go test -v
-# Run sync/operations integration tests against a remote
-cd fs/sync && go test -v -remote TestDrive:
-cd fs/operations && go test -v -remote TestDrive:
+Deliverables:
 
-# Run integration tests via test framework
-go run ./fstest/test_all -backends drive
-```
+- UPSTREAM_ANALYSIS.md
 
-## Architecture
+- BREAKING_CHANGES.md
 
-### Entry Point and Plugin Registration
+---
 
-`rclone.go` is the main entry point. It imports `backend/all` and `cmd/all` which use Go's `init()` pattern to register all backends and commands. Each backend calls `fs.Register()` with a `fs.RegInfo` struct during init.
+# Agent: Custom Code Auditor
 
-### Core Interfaces (`fs/`)
+Responsibilities:
 
-The `fs` package defines the core abstractions:
-- **`fs.Fs`** (`fs/types.go`): The filesystem interface every backend must implement (List, NewObject, Put, Mkdir, Rmdir).
-- **`fs.Object`** (`fs/types.go`): Interface for a file/object (Open, Update, Remove, SetModTime).
-- **`fs.Features`** (`fs/features.go`): Optional capabilities a backend can declare (Purge, Copy, Move, DirMove, etc.). Backends set function pointers for operations they support; nil means not supported.
-- **`fs.RegInfo`** (`fs/registry.go`): Registration metadata for a backend including its name, config options, and NewFs constructor.
+Review all fork-specific modifications.
 
-### Backend Structure (`backend/`)
+Protected files:
 
-Each backend is a single Go package (e.g., `backend/s3/`, `backend/drive/`). Key conventions:
-- Main implementation in a single file (e.g., `s3.go`) - **do not** split into `fs.go`/`object.go`.
-- API types go in a separate `api/types.go` file.
-- Test file (e.g., `s3_test.go`) uses `fstests.Run()` from `fstest/fstests` for standardized integration tests.
-- Register in `backend/all/all.go` via blank import.
-- HTTP-based backends should use `lib/rest` for HTTP calls and `fs/fshttp` for the HTTP client.
-- Use `lib/dircache` for directory-ID-based remotes, `lib/oauthutil` for OAuth, `lib/pacer` for rate limiting.
+- .github/workflows/build.yml
 
-### Command Structure (`cmd/`)
+- backend/local/local.go
 
-Each command is a package under `cmd/` registered in `cmd/all/all.go` via blank import. Commands use cobra via `cmd.Main()`.
+- backend/all/all.go
 
-### Key Subsystems
+- fs/override.go
 
-- **`fs/operations/`**: Core file operations (Copy, Move, Delete, etc.)
-- **`fs/sync/`**: Directory sync logic
-- **`fs/march/`**: Parallel directory tree walker used by sync
-- **`fs/filter/`**: Include/exclude filtering
-- **`fs/accounting/`**: Transfer statistics and bandwidth limiting
-- **`fs/config/`**: Configuration file management
-- **`vfs/`**: Virtual filesystem layer (used by mount, serve)
-- **`librclone/`**: C-compatible library interface for embedding rclone
-- **`fstest/`**: Integration test framework; `fstest/fstests/` has the generic backend test suite
+- fs/types.go
 
-## Commit Message Convention
+- fs/operations/reopen.go
 
-Prefix with the directory of the change, then a colon: `drive: add team drive support - fixes #885`. For cross-cutting changes use a broader prefix like `fs` or `operations`.
+- fs/rc/rcserver/rcserver.go
 
-Make the first line of your commit message a summary of the change that a user (not a developer) of rclone would like to read. So write `drive: fix server side copy of big files` instead of `drive: no longer set the MimeType in Move or Copy`. This is important because these lines go into the change log which is read by users.
+- lib/pool/reader_writer.go
 
-## Code Commenting Style
+Protected directories:
 
-Comments describe the code as it is now, for a future reader who has no knowledge of the change that introduced it.
+- backend/teldrive/**
 
-Every exported type, function, field, and constant has a **godoc comment** that starts with its name and is phrased as a present-tense statement of what it is or does (`// Mkdir makes the directory (container, bucket)`)
+- backend/alist/**
 
-**Document the contract** callers need - preconditions, what's returned, which sentinel errors are returned and when, and any "shouldn't return an error if it already exists" style caveats - rather than the implementation.
+- backend/alldebrid/**
 
-**Keep comments terse**: a single line for most things, with extra paragraphs (separated by blank `//` lines) reserved for genuine subtlety.
+- backend/terabox/**
 
-Inline comments inside function bodies should **explain why** - a non-obvious API quirk, a workaround, a gotcha, or an ordering constraint - and may cite an external reference (forum thread, vendor docs, RFC) when that's what makes the behaviour non-obvious; skip comments that merely restate what the code plainly does.
+Tasks:
 
-Use `FIXME` and `TODO` for known shortcomings.
+- Understand purpose of modification.
 
-**Do not write comments that narrate the change itself** or compare against the previous behaviour (no "now we also handle...", "changed to...", "previously this returned...", or references to bug/PR numbers in the code) - that context belongs in the commit message, not in source that will outlive the change.
+- Categorize modification type.
 
-Code comments should only refer to **current** behaviour - and shouldn't describe behaviour that is trivially deducible from reading the code.
+- Detect upstream dependencies.
 
-## Linting Configuration
+- Detect future maintenance risks.
 
-Uses golangci-lint v2 with config in `.golangci.yml`. Enabled linters: errcheck, govet, ineffassign, staticcheck, unused, gocritic, misspell, revive, unconvert. The `goimports` formatter is also enabled.
+- Detect compatibility issues.
 
-## Documentation
+Deliverables:
 
-- Backend option docs come from `Help:` fields in the Go source Options structs, not from markdown files.
-- Command docs are in the command source code (e.g., `cmd/ls/ls.go`).
-- Don't commit autogenerated doc changes from `make backenddocs` or `make commanddocs`.
-- Website docs are in `docs/content/` as markdown, built with Hugo (`make serve` to preview).
+- CUSTOM_CHANGES_AUDIT.md
+
+---
+
+# Agent: Backend Compatibility Specialist
+
+Responsibilities:
+
+Ensure all custom backends remain compatible.
+
+Protected backends:
+
+- teldrive
+
+- alist
+
+- alldebrid
+
+- terabox
+
+Tasks:
+
+- validate imports
+
+- validate interfaces
+
+- validate backend registration
+
+- validate fs integration
+
+- validate options structures
+
+- validate command registration
+
+Deliverables:
+
+- BACKEND_COMPATIBILITY_REPORT.md
+
+---
+
+# Agent: Core Merge Engineer
+
+Responsibilities:
+
+Perform logical merge between upstream and custom modifications.
+
+Rules:
+
+- Start from upstream implementation.
+
+- Reapply custom functionality.
+
+- Adapt code to upstream APIs.
+
+- Preserve behavior whenever possible.
+
+Never:
+
+- remove protected functionality
+
+- delete custom backends
+
+- overwrite protected files blindly
+
+Deliverables:
+
+- MERGE_REPORT.md
+
+---
+
+# Agent: Compatibility Validator
+
+Responsibilities:
+
+Inspect merged code for compatibility risks.
+
+Verify:
+
+- imports
+
+- interfaces
+
+- registrations
+
+- fs integration
+
+- rc integration
+
+- workflow consistency
+
+Analyze:
+
+- API incompatibilities
+
+- probable compile issues
+
+- probable runtime issues
+
+Do not:
+
+- run builds
+
+- run tests
+
+- execute CI
+
+Deliverables:
+
+- COMPATIBILITY_REPORT.md
+
+---
+
+# Agent: Conflict Resolver
+
+Responsibilities:
+
+Review every merge conflict.
+
+For each conflict identify:
+
+- upstream intent
+
+- custom intent
+
+- final merged approach
+
+Deliverables:
+
+- CONFLICT_REPORT.md
+
+---
+
+# Agent: Workflow Guardian
+
+Responsibilities:
+
+Protect custom CI/CD configuration.
+
+Protected file:
+
+- .github/workflows/build.yml
+
+Rules:
+
+- Never overwrite automatically.
+
+- Review upstream workflow changes.
+
+- Recommend manual improvements.
+
+- Preserve existing custom workflow behavior.
+
+Deliverables:
+
+- WORKFLOW_REVIEW.md
+
+---
+
+# Agent: Release Reviewer
+
+Responsibilities:
+
+Perform final review.
+
+Checklist:
+
+- custom backends preserved
+
+- protected files preserved
+
+- backend registrations verified
+
+- workflow preserved
+
+- upstream improvements integrated
+
+- risks documented
+
+Deliverables:
+
+- FINAL_REVIEW.md
+
+---
+
+# Global Rules
+
+Always read:
+
+.custom-merge-manifest.yml
+
+before starting.
+
+Protected components must never be overwritten automatically.
+
+When upstream and custom code differ:
+
+1. Understand upstream purpose.
+
+2. Understand custom purpose.
+
+3. Build a compatible solution.
+
+4. Preserve custom functionality.
+
+Prefer adaptation over deletion.
+
+Never perform blind overwrite.
+
+Document all assumptions.
+
+Document all compromises.
+
+Document all unresolved risks.

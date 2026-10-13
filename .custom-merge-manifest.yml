@@ -1,0 +1,1 @@
+protected_files:  - .github/workflows/build.yml  - backend/local/local.go  - backend/all/all.go  - fs/override.go  - fs/types.go  - fs/operations/reopen.go  - fs/rc/rcserver/rcserver.go  - lib/pool/reader_writer.goprotected_directories:  - backend/teldrive  - backend/alist  - backend/alldebrid  - backend/terabox
