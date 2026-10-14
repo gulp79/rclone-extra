@@ -136,6 +136,21 @@ buffers one chunk in memory.
 `,
 			Advanced: true,
 		}, {
+			Name:    "channel_id",
+			Default: 0,
+			Help: `Telegram channel ID to store uploaded chunks in.
+
+When set, uploads go to this channel instead of the channel currently
+selected on the TelDrive server, without changing the selection for
+other clients. The channel must already be registered with your
+TelDrive account. Uploads fail rather than rolling over to another
+channel when this channel is full or unavailable.
+
+Leave at 0 to use the server's selected channel. Requires a TelDrive
+server that supports the channelId upload parameter.
+`,
+			Advanced: true,
+		}, {
 			Help: `Optional alternative URL for upload API calls.
 
 If set, upload chunk requests will be sent to this host instead of
@@ -185,6 +200,7 @@ type Options struct {
 	LinkPassword      string               `config:"link_password"`      // Password for public share links
 	ChunkSize         fs.SizeSuffix        `config:"chunk_size"`         // Upload chunk size (auto-aligned to 16 MiB)
 	UploadConcurrency int                  `config:"upload_concurrency"` // Parallel upload streams per file
+	ChannelID         int64                `config:"channel_id"`         // Storage channel for uploads (0 = server selection)
 	EncryptFiles      bool                 `config:"encrypt_files"`      // Enable server-side encryption
 	PageSize          int64                `config:"page_size"`          // Directory listing page size
 	HashEnabled       bool                 `config:"hash_enabled"`       // Enable BLAKE3 tree hashing
@@ -461,6 +477,9 @@ func (f *Fs) readMetaDataForPath(ctx context.Context, path string, options *api.
 		},
 	}
 	setParentParameter(opts.Parameters, directoryID)
+	if options.Scope != "" {
+		opts.Parameters.Set("scope", options.Scope)
+	}
 	if options.Cursor != "" {
 		opts.Parameters.Set("cursor", options.Cursor)
 	}
@@ -577,6 +596,87 @@ func (f *Fs) ListP(ctx context.Context, dir string, callback fs.ListRCallback) e
 		}
 		opts.Cursor = info.NextCursor
 	}
+}
+
+// ListR lists all objects and directories recursively using the
+// server-side recursive listing. Remotes are rebuilt from parent links.
+func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) error {
+	directoryID, err := f.dirCache.FindDir(ctx, dir, false)
+	if err != nil {
+		return err
+	}
+	opts := &api.MetadataRequestOptions{Limit: f.opt.PageSize, Scope: "recursive"}
+	var items []api.FileInfo
+	for {
+		info, err := f.readMetaDataForPath(ctx, dir, opts)
+		if err != nil {
+			if errors.Is(err, fs.ErrorObjectNotFound) {
+				return fs.ErrorDirNotFound
+			}
+			return err
+		}
+		items = append(items, info.Files...)
+		if info.NextCursor == "" {
+			break
+		}
+		opts.Cursor = info.NextCursor
+	}
+	byID := make(map[string]*api.FileInfo, len(items))
+	for i := range items {
+		byID[items[i].Id] = &items[i]
+	}
+	var entries fs.DirEntries
+	flush := func() error {
+		if len(entries) == 0 {
+			return nil
+		}
+		batch := entries
+		entries = nil
+		return callback(batch)
+	}
+	for i := range items {
+		remote, ok := f.recursiveRemote(dir, directoryID, byID, &items[i])
+		if !ok {
+			continue
+		}
+		switch items[i].Kind {
+		case "folder":
+			f.dirCache.Put(remote, items[i].Id)
+			entries = append(entries, fs.NewDir(remote, items[i].ModTime).
+				SetID(items[i].Id).
+				SetParentID(parentIDOrRoot(items[i].ParentId)).
+				SetSize(items[i].Size))
+		case "file":
+			o, err := f.newObjectWithInfo(ctx, remote, &items[i])
+			if err == nil {
+				entries = append(entries, o)
+			}
+		}
+		if len(entries) >= 1000 {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	return flush()
+}
+
+// recursiveRemote rebuilds the remote path of an item from the recursive
+// listing by walking parent links up to directoryID.
+func (f *Fs) recursiveRemote(dir, directoryID string, byID map[string]*api.FileInfo, item *api.FileInfo) (string, bool) {
+	segs := []string{f.opt.Enc.ToStandardName(item.Name)}
+	for parentIDOrRoot(item.ParentId) != directoryID {
+		parent, ok := byID[parentIDOrRoot(item.ParentId)]
+		if !ok {
+			return "", false
+		}
+		item = parent
+		segs = append(segs, f.opt.Enc.ToStandardName(item.Name))
+	}
+	for i, j := 0, len(segs)-1; i < j; i, j = i+1, j-1 {
+		segs[i], segs[j] = segs[j], segs[i]
+	}
+	return path.Join(append([]string{dir}, segs...)...), true
 }
 
 // Return an Object from a path
@@ -1525,4 +1625,5 @@ var (
 	_ fs.PublicLinker    = (*Fs)(nil)
 	_ fs.ParentIDer      = (*Object)(nil)
 	_ fs.Abouter         = (*Fs)(nil)
+	_ fs.ListRer         = (*Fs)(nil)
 )
