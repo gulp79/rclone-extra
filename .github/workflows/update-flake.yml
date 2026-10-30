@@ -5,9 +5,6 @@ on:
   workflow_run:
     workflows: ["Build rclone-extra - Multi Platform"]
     types: [completed]
-  # Fallback in case a run was missed
-  schedule:
-    - cron: '17 4 * * *'
   workflow_dispatch:
     inputs:
       tag:
