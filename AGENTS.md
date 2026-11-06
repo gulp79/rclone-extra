@@ -14,294 +14,90 @@ All components declared there are merge-protected.
 
 ---
 
-# Agent: Upstream Analyst
-
-Responsibilities:
-
-- Analyze upstream releases.
-
-- Review changelogs.
-
-- Review commits.
-
-- Detect API changes.
-
-- Detect interface changes.
-
-- Detect package moves.
-
-- Detect renamed functions.
-
-- Detect renamed structs.
-
-- Detect breaking changes.
-
-Deliverables:
-
-- UPSTREAM_ANALYSIS.md
-
-- BREAKING_CHANGES.md
-
----
-
-# Agent: Custom Code Auditor
-
-Responsibilities:
-
-Review all fork-specific modifications.
+# Protected Components
 
 Protected files:
-
-- .github/workflows/build.yml
-
-- backend/local/local.go
-
-- backend/all/all.go
-
-- fs/override.go
-
-- fs/types.go
-
-- fs/operations/reopen.go
-
-- fs/rc/rcserver/rcserver.go
-
-- lib/pool/reader_writer.go
+- `.github/workflows/build.yml`
+- `backend/local/local.go`
+- `backend/all/all.go`
+- `fs/override.go`
+- `fs/types.go`
+- `fs/operations/reopen.go`
+- `fs/rc/rcserver/rcserver.go`
+- `fs/registry.go`
+- `lib/pool/reader_writer.go`
 
 Protected directories:
-
-- backend/teldrive/**
-
-- backend/alist/**
-
-- backend/alldebrid/**
-
-- backend/terabox/**
-
-Tasks:
-
-- Understand purpose of modification.
-
-- Categorize modification type.
-
-- Detect upstream dependencies.
-
-- Detect future maintenance risks.
-
-- Detect compatibility issues.
-
-Deliverables:
-
-- CUSTOM_CHANGES_AUDIT.md
+- `backend/teldrive/**`
+- `backend/alist/**`
+- `backend/alldebrid/**`
+- `backend/terabox/**`
 
 ---
 
-# Agent: Backend Compatibility Specialist
+# Operational Rules & Optimizations
 
-Responsibilities:
+### 1. Fast-Track Conflict Resolution (Efficiency & Token Optimization)
+When performing `git merge <target-tag>`:
+- Check if conflicted files are declared in `.custom-merge-manifest.yml` or have custom fork commits (`git diff <base-tag> HEAD -- <file>`).
+- For any file NOT in the manifest and NOT modified by the fork (e.g. upstream docs, tests, unchanged backends), **immediately resolve in favor of upstream in batch**:
+  ```bash
+  git checkout <target-tag> -- <unmodified-file>
+  ```
+- Do NOT spend tokens or roundtrips performing deep line-by-line analysis on standard upstream files.
+- Focus deep 3-way merge strictly on protected components and configuration (`.gitignore`, `VERSION`).
 
-Ensure all custom backends remain compatible.
+### 2. Line Endings (CRLF vs LF)
+- Always ensure Unix line endings (LF) for all Go code and configuration files.
+- Prevent Windows CRLF conversions from creating massive spurious git diffs against upstream.
 
-Protected backends:
-
-- teldrive
-
-- alist
-
-- alldebrid
-
-- terabox
-
-Tasks:
-
-- validate imports
-
-- validate interfaces
-
-- validate backend registration
-
-- validate fs integration
-
-- validate options structures
-
-- validate command registration
-
-Deliverables:
-
-- BACKEND_COMPATIBILITY_REPORT.md
+### 3. Reporting Policy
+- Detailed analysis, conflict summaries, and compatibility audits are reported **directly in the chat output**.
+- Do NOT create redundant markdown files in the repository unless explicitly requested.
+- Any generated report files are local development artifacts, ignored via `.gitignore`, and **must never be committed** to the production branch.
 
 ---
 
-# Agent: Core Merge Engineer
+# Agent Responsibilities
 
-Responsibilities:
+### Upstream Analyst
+- Analyze upstream releases, changelogs, commits, and breaking changes / CVEs.
 
-Perform logical merge between upstream and custom modifications.
+### Custom Code Auditor
+- Review all fork-specific modifications declared in `.custom-merge-manifest.yml`.
+- Categorize modification types and detect upstream dependencies.
 
-Rules:
+### Backend Compatibility Specialist
+- Ensure all 4 custom backends (`teldrive`, `alist`, `alldebrid`, `terabox`) remain fully compatible.
+- Validate registrations in `backend/all/all.go`.
 
-- Start from upstream implementation.
+### Core Merge Engineer
+- Perform logical merge between upstream and custom modifications.
+- Start from upstream implementation and re-apply custom functionality on top.
+- Retain existing custom behavior wherever possible.
 
-- Reapply custom functionality.
+### Compatibility Validator
+- Inspect interfaces (`fs.Fs`, `fs.Object`, etc.), registrations, imports, and operations.
+- Static code analysis only: **Do NOT run builds, tests, or CI workflows**.
 
-- Adapt code to upstream APIs.
-
-- Preserve behavior whenever possible.
-
-Never:
-
-- remove protected functionality
-
-- delete custom backends
-
-- overwrite protected files blindly
-
-Deliverables:
-
-- MERGE_REPORT.md
+### Workflow Guardian
+- Protect custom CI/CD configuration (`.github/workflows/build.yml`).
+- Preserve static MinGW CGO WinFsp, Android NDK, and pure-static Linux builds.
 
 ---
 
-# Agent: Compatibility Validator
+# Global Merge Rules
 
-Responsibilities:
-
-Inspect merged code for compatibility risks.
-
-Verify:
-
-- imports
-
-- interfaces
-
-- registrations
-
-- fs integration
-
-- rc integration
-
-- workflow consistency
-
-Analyze:
-
-- API incompatibilities
-
-- probable compile issues
-
-- probable runtime issues
-
-Do not:
-
-- run builds
-
-- run tests
-
-- execute CI
-
-Deliverables:
-
-- COMPATIBILITY_REPORT.md
-
----
-
-# Agent: Conflict Resolver
-
-Responsibilities:
-
-Review every merge conflict.
-
-For each conflict identify:
-
-- upstream intent
-
-- custom intent
-
-- final merged approach
-
-Deliverables:
-
-- CONFLICT_REPORT.md
-
----
-
-# Agent: Workflow Guardian
-
-Responsibilities:
-
-Protect custom CI/CD configuration.
-
-Protected file:
-
-- .github/workflows/build.yml
-
-Rules:
-
-- Never overwrite automatically.
-
-- Review upstream workflow changes.
-
-- Recommend manual improvements.
-
-- Preserve existing custom workflow behavior.
-
-Deliverables:
-
-- WORKFLOW_REVIEW.md
-
----
-
-# Agent: Release Reviewer
-
-Responsibilities:
-
-Perform final review.
-
-Checklist:
-
-- custom backends preserved
-
-- protected files preserved
-
-- backend registrations verified
-
-- workflow preserved
-
-- upstream improvements integrated
-
-- risks documented
-
-Deliverables:
-
-- FINAL_REVIEW.md
-
----
-
-# Global Rules
-
-Always read:
-
-.custom-merge-manifest.yml
-
-before starting.
+Always read `.custom-merge-manifest.yml` before starting.
 
 Protected components must never be overwritten automatically.
 
 When upstream and custom code differ:
-
 1. Understand upstream purpose.
-
 2. Understand custom purpose.
-
 3. Build a compatible solution.
-
 4. Preserve custom functionality.
 
 Prefer adaptation over deletion.
-
 Never perform blind overwrite.
-
-Document all assumptions.
-
-Document all compromises.
-
-Document all unresolved risks.
+Document all assumptions, compromises, and risks clearly.
